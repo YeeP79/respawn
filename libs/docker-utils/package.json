@@ -1,0 +1,12 @@
+{
+  "name": "@respawn/docker-utils",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@respawn/shared-types": "workspace:*"
+  }
+}

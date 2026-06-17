@@ -1,0 +1,5 @@
+{
+  "name": "l4d2",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}

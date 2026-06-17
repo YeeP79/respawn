@@ -1,0 +1,42 @@
+{
+  "name": "@respawn/source",
+  "version": "0.0.0",
+  "license": "MIT",
+  "scripts": {
+    "build": "nx run-many -t build",
+    "test": "nx run-many -t test",
+    "lint": "nx run-many -t lint",
+    "typecheck": "nx run-many -t typecheck",
+    "docker-build": "nx run-many -t docker-build",
+    "graph": "nx graph",
+    "respawn": "nx run respawn:cdk --profile=respawn",
+    "respawn:synth": "nx run respawn:cdk --nonInteractive --action=synth --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
+    "respawn:diff": "nx run respawn:cdk --nonInteractive --action=diff --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
+    "respawn:deploy": "nx run respawn:cdk --nonInteractive --action=deploy --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
+    "respawn:destroy": "nx run respawn:cdk --nonInteractive --action=destroy --profile=respawn --environment=dev --force --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
+    "respawn:status": "nx run respawn:cdk --nonInteractive --action=status --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust"
+  },
+  "private": true,
+  "devDependencies": {
+    "@nx/eslint": "22.5.1",
+    "@nx/eslint-plugin": "^22.5.1",
+    "@nx/js": "22.5.1",
+    "@nx/vite": "22.5.1",
+    "@nx/web": "22.5.1",
+    "@nxlv/python": "^22.1.0",
+    "@swc-node/register": "1.11.1",
+    "@swc/core": "1.15.8",
+    "@swc/helpers": "0.5.18",
+    "@types/node": "^25.3.0",
+    "@vitest/ui": "^4.0.0",
+    "eslint": "~8.57.0",
+    "jiti": "2.4.2",
+    "nx": "22.5.1",
+    "prettier": "^2.6.2",
+    "tslib": "^2.3.0",
+    "typescript": "~5.9.2",
+    "typescript-eslint": "^8.56.0",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.0"
+  }
+}

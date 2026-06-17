@@ -1,0 +1,6 @@
+{
+  "name": "docker-utils",
+  "projectType": "library",
+  "sourceRoot": "libs/docker-utils/src",
+  "tags": ["type:lib", "lang:ts"]
+}

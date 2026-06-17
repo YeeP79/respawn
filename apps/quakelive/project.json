@@ -1,0 +1,5 @@
+{
+  "name": "quakelive",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}

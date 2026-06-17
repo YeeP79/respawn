@@ -1,0 +1,5 @@
+{
+  "name": "valheim",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}

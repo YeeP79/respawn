@@ -1,0 +1,26 @@
+{
+  "name": "@respawn/respawn",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "executors": "./executors.json",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./executors.json": "./executors.json"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10.0",
+    "@respawn/docker-utils": "workspace:*",
+    "@respawn/shared-types": "workspace:*",
+    "aws-cdk-lib": "^2.175.1",
+    "chalk": "^5.4.1",
+    "constructs": "^10.4.2",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@nx/devkit": "^22.5.1",
+    "aws-cdk": "^2.175.1",
+    "tsx": "^4.19.4"
+  }
+}

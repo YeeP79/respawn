@@ -1,0 +1,5 @@
+{
+  "name": "rust",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}

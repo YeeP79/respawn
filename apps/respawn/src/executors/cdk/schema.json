@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/schema",
+  "type": "object",
+  "title": "CDK Executor Schema",
+  "description": "Deploy and manage game servers via CDK with interactive CLI",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "The CDK action to perform (required in non-interactive mode)",
+      "enum": ["deploy", "destroy", "synth", "diff", "status"]
+    },
+    "environment": {
+      "type": "string",
+      "description": "Target environment (required in non-interactive mode)",
+      "enum": ["dev", "staging", "prod"]
+    },
+    "service": {
+      "type": "string",
+      "description": "Service name or comma-separated list of services (required in non-interactive mode)"
+    },
+    "nonInteractive": {
+      "type": "boolean",
+      "description": "Skip the interactive CLI and use flags directly. Requires --action, --environment, and --service.",
+      "default": false
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Preview changes without deploying (runs cdk synth instead of deploy)",
+      "default": false
+    },
+    "verbose": {
+      "type": "boolean",
+      "description": "Enable debug-level logging output",
+      "default": false
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Skip confirmation prompts (use with caution)",
+      "default": false
+    },
+    "requireApproval": {
+      "type": "string",
+      "description": "CDK approval level for security-sensitive changes",
+      "enum": ["never", "any-change", "broadening"],
+      "default": "never"
+    },
+    "profile": {
+      "type": "string",
+      "description": "AWS CLI profile to use"
+    },
+    "region": {
+      "type": "string",
+      "description": "AWS region override (defaults to config value)"
+    }
+  },
+  "additionalProperties": false
+}

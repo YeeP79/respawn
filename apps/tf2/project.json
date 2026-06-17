@@ -1,0 +1,5 @@
+{
+  "name": "tf2",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}
