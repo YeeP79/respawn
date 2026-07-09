@@ -1,24 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "composite": false,
-    "declaration": false,
-    "emitDeclarationOnly": false,
-    "noEmit": false,
-    "module": "nodenext",
-    "types": [
-      "node"
-    ],
-    "declarationMap": false,
-    "importHelpers": false,
-    "rootDir": "src"
+    "outDir": "../../dist/apps/respawn-mcp",
+    "tsBuildInfoFile": "../../dist/apps/respawn-mcp/tsconfig.lib.tsbuildinfo",
+    "types": ["node"]
   },
-  "include": [
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts"
-  ]
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
 }

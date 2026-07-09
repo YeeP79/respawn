@@ -8,11 +8,36 @@
   ],
   "targets": {
     "build": {
+      "dependsOn": [
+        "generate-manifests"
+      ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc --build apps/respawn-mcp/tsconfig.lib.json",
+        "command": "tsc -p apps/respawn-mcp/tsconfig.build.json",
         "cwd": "{workspaceRoot}"
       }
+    },
+    "generate-manifests": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --experimental-strip-types apps/respawn-mcp/generate-manifests.mjs",
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "typecheck": {
+      "dependsOn": [
+        "generate-manifests"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "generate-manifests"
+      ]
+    },
+    "lint": {
+      "dependsOn": [
+        "generate-manifests"
+      ]
     }
   }
 }

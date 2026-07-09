@@ -1,0 +1,104 @@
+{
+  "displayName": "Counter-Strike 1.6",
+  "engine": "goldsrc",
+  "notes": "GoldSrc/HLDS. rcon rides UDP on the game port. maps are queried live from the running server.",
+  "maps": "live",
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Switch to a different map immediately.",
+      "rcon": "changelevel {map}",
+      "args": { "map": { "description": "Map name, e.g. de_nuke (no .bsp)", "type": "string" } }
+    },
+    {
+      "name": "restart_round",
+      "description": "Restart the current round after a delay in seconds.",
+      "rcon": "sv_restartround {seconds}",
+      "args": { "seconds": { "description": "Delay before restart", "type": "int" } }
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name or userid (see server_status for ids).",
+      "rcon": "kick {player}",
+      "args": { "player": { "description": "Player name in quotes, or #userid" } },
+      "danger": true
+    },
+    {
+      "name": "ban_player",
+      "description": "Ban a player by userid for N minutes (0 = permanent).",
+      "rcon": "banid {minutes} {userid} kick",
+      "args": {
+        "minutes": { "description": "Ban length in minutes; 0 is permanent", "type": "int" },
+        "userid": { "description": "Numeric userid from the players query" }
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone on the server.",
+      "rcon": "say {message}",
+      "args": { "message": { "description": "Text to broadcast" } }
+    },
+    {
+      "name": "set_join_password",
+      "description": "Set or clear the password players need to join (empty clears it). Distinct from the rcon admin password.",
+      "rcon": "sv_password {password}",
+      "args": { "password": { "description": "Join password; empty string removes it" } }
+    }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Who is connected: userid, name and steamid for each player, plus the current map. Use the userid with kick_player / ban_player.",
+      "rcon": "status",
+      "singles": {
+        "hostname": "^hostname\\s*:\\s*(.+)$",
+        "map": "^map\\s*:\\s*(\\S+)",
+        "playerCount": "^players\\s*:\\s*(.+)$"
+      },
+      "row": {
+        "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|VALVE_\\S+)?",
+        "fields": ["userid", "name", "steamid"],
+        "skipIf": "^#\\s*userid"
+      }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "mp_friendlyfire",
+      "description": "Whether players can damage teammates.",
+      "default": "0",
+      "values": ["0", "1"]
+    },
+    {
+      "name": "mp_timelimit",
+      "description": "Minutes per map before it changes.",
+      "default": "0",
+      "range": [0, 120]
+    },
+    {
+      "name": "mp_roundtime",
+      "description": "Round length in minutes.",
+      "default": "5",
+      "range": [1, 9]
+    },
+    {
+      "name": "mp_startmoney",
+      "description": "Money each player starts a match with.",
+      "default": "800",
+      "range": [800, 16000]
+    },
+    {
+      "name": "sv_gravity",
+      "description": "World gravity; 800 is default, lower is floatier.",
+      "default": "800",
+      "range": [100, 2000]
+    },
+    {
+      "name": "mp_autoteambalance",
+      "description": "Auto-balance team sizes between rounds.",
+      "default": "1",
+      "values": ["0", "1"]
+    }
+  ]
+}

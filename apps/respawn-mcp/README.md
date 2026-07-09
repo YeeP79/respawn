@@ -55,17 +55,55 @@ then to `us-east-1`.
 
 ## Tools
 
+The MCP holds no game knowledge. Everything game- or mod-specific — which commands
+exist, how to parse a query — comes from each server's manifest.
+
 | Tool | Arguments | Effect |
 |------|-----------|--------|
 | `list_servers` | — | Running, controllable servers |
-| `server_status` | service | `status` — players and current map |
-| `change_map` | service, map | `changelevel <map>` |
+| `get_server_options` | service | The server's manifest: commands, queries, cvars, maps |
+| `run_command` | service, command, args | Run a declared command (change_map, kick_player, mod commands, …) |
+| `query` | service, query | Run a declared query (e.g. `players`) → structured JSON |
 | `set_cvar` | service, cvar, value | Set any console variable live |
-| `set_server_password` | service, password | `sv_password` (empty clears it) — the join password, not rcon |
-| `say` | service, message | Broadcast to everyone |
 | `rcon` | service, command | Raw rcon escape hatch |
 
-Example: *"change cs16 to de_nuke"* → `change_map(service="cs16", map="de_nuke")`.
+The LLM's normal flow: call `get_server_options` to see what a server offers, then
+`run_command` / `query` with valid names and values.
+
+## Per-server manifests
+
+Each game declares its controllable surface in `apps/<name>/rcon-manifest.json`,
+bundled into the MCP at build (`generate-manifests.mjs`). Editing one — adding a
+mod's commands, a new query — needs only an MCP rebuild, never a game redeploy.
+
+```jsonc
+{
+  "engine": "goldsrc",
+  "commands": [
+    { "name": "change_map", "description": "Switch map now",
+      "rcon": "changelevel {map}", "args": { "map": { "type": "string" } } },
+    { "name": "slap", "description": "AMX Mod X slap", "mod": "amxmodx",
+      "rcon": "amx_slap {player} {dmg}" }          // mod command — MCP needs no code
+  ],
+  "queries": [
+    { "name": "players", "description": "Who is connected", "rcon": "status",
+      "singles": { "map": "^map\\s*:\\s*(\\S+)" },
+      "row": { "match": "^#\\s*(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT)?",
+               "fields": ["userid", "name", "steamid"],
+               "skipIf": "^#\\s*userid" } }
+  ],
+  "cvars": [ { "name": "mp_friendlyfire", "default": "0", "values": ["0", "1"] } ],
+  "maps": "live"        // pulled from the running server, or a static list
+}
+```
+
+- **commands** — an rcon template with `{arg}` placeholders. Mod commands are
+  first-class; the MCP runs them with no game-specific code.
+- **queries** — data-driven parsing. `singles` pull one value each from the whole
+  reply; `row` builds a record per matching line. This is why player parsing lives
+  here, not in the MCP.
+- **cvars** — documented tunables with ranges, so the LLM uses valid values.
+- **maps** — `"live"` queries the server (`maps *`); or an explicit array.
 
 ## Security notes
 
