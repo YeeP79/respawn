@@ -39,29 +39,25 @@ export class GameServerFargateService extends Construct {
     const { config } = props;
     const rconEnabled = config.rconControl.enabled;
 
-    // When the rcon-control sidecar is on, harden the ECS Exec channel: a
-    // customer-managed KMS key encrypts the session end-to-end (beyond the SSM
-    // default TLS), and every session is logged to CloudWatch for an audit trail
-    // of who ran what. Only created when exec is actually used.
+    // When the rcon-control sidecar is on, audit every ECS Exec session to
+    // CloudWatch — a record of who ran what. The channel is already TLS +
+    // IAM-authenticated by SSM. A customer KMS session key was tried but makes the
+    // interactive session fail to start ("Cannot perform start session: EOF"), so
+    // it is intentionally left off; the audit log is the durable hardening.
     let execConfig: ecs.ExecuteCommandConfiguration | undefined;
     let execKey: kms.Key | undefined;
     let execLogGroup: logs.LogGroup | undefined;
     if (rconEnabled) {
-      execKey = new kms.Key(this, 'ExecKey', {
-        description: `Respawn ECS Exec session key for ${config.serviceName}`,
-        enableKeyRotation: true,
-      });
       execLogGroup = new logs.LogGroup(this, 'ExecAuditLog', {
         logGroupName: `/respawn/${config.environment}/${config.serviceName}/exec-audit`,
         retention: logs.RetentionDays.ONE_YEAR,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       });
       execConfig = {
-        kmsKey: execKey,
         logging: ecs.ExecuteCommandLogging.OVERRIDE,
         logConfiguration: {
           cloudWatchLogGroup: execLogGroup,
-          cloudWatchEncryptionEnabled: true,
+          cloudWatchEncryptionEnabled: false,
         },
       };
     }
