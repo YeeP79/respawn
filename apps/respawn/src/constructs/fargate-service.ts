@@ -3,6 +3,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
@@ -35,12 +37,41 @@ export class GameServerFargateService extends Construct {
     super(scope, id);
 
     const { config } = props;
+    const rconEnabled = config.rconControl.enabled;
+
+    // When the rcon-control sidecar is on, harden the ECS Exec channel: a
+    // customer-managed KMS key encrypts the session end-to-end (beyond the SSM
+    // default TLS), and every session is logged to CloudWatch for an audit trail
+    // of who ran what. Only created when exec is actually used.
+    let execConfig: ecs.ExecuteCommandConfiguration | undefined;
+    let execKey: kms.Key | undefined;
+    let execLogGroup: logs.LogGroup | undefined;
+    if (rconEnabled) {
+      execKey = new kms.Key(this, 'ExecKey', {
+        description: `Respawn ECS Exec session key for ${config.serviceName}`,
+        enableKeyRotation: true,
+      });
+      execLogGroup = new logs.LogGroup(this, 'ExecAuditLog', {
+        logGroupName: `/respawn/${config.environment}/${config.serviceName}/exec-audit`,
+        retention: logs.RetentionDays.ONE_YEAR,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      execConfig = {
+        kmsKey: execKey,
+        logging: ecs.ExecuteCommandLogging.OVERRIDE,
+        logConfiguration: {
+          cloudWatchLogGroup: execLogGroup,
+          cloudWatchEncryptionEnabled: true,
+        },
+      };
+    }
 
     // Cluster
     this.cluster = new ecs.Cluster(this, 'Cluster', {
       vpc: props.vpc,
       clusterName: `respawn-${config.environment}-${config.serviceName}`,
       enableFargateCapacityProviders: true,
+      executeCommandConfiguration: execConfig,
     });
 
     // Logging
@@ -208,6 +239,20 @@ export class GameServerFargateService extends Construct {
           resources: ['*'],
         }),
       );
+
+      // The KMS key encrypts the exec data channel; the task must be able to use it.
+      execKey?.grantEncryptDecrypt(taskDefinition.taskRole);
+
+      // The task writes each exec session to the audit log group.
+      if (execLogGroup) {
+        execLogGroup.grantWrite(taskDefinition.taskRole);
+        taskDefinition.taskRole.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['logs:DescribeLogGroups'],
+            resources: ['*'],
+          }),
+        );
+      }
     }
 
     // Fargate service
