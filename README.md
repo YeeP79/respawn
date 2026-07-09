@@ -135,6 +135,8 @@ pnpm respawn        # interactive menu -> Deploy -> minetest
    `ResourceInitializationError`.
 4. **`CPU` and `MEMORY` must be a valid Fargate pair** — validated at load, fails fast.
 5. **Docker build context is the repo root**, so `COPY` paths are `apps/<name>/...`.
+6. **Declare anything the server cannot run without in `REQUIRED_ENV_VARS`** — a GSLT, an admin
+   Steam64 ID. Deploy refuses to proceed if one is unset or still a placeholder.
 
 ### Common Mistakes to Avoid
 
@@ -176,6 +178,7 @@ ENABLE_PERSISTENT_STORAGE=false   # wrong for any SteamCMD-installed game
 - **First-class secrets:** `SECRET_REFS` → Secrets Manager / SSM → ECS `secrets:`, never `environment:`
 - **Persistent worlds:** optional EFS volume, transit-encrypted, IAM-authorised
 - **Deploy-time prompts:** pick a gamemode at deploy without editing config (`DEPLOY_PROMPTS`)
+- **Deploy preflight:** refuses to deploy when a required value is a placeholder or a referenced secret is absent
 - **Interactive or scripted:** Clack menu by default, `--non-interactive` for CI
 
 ---
@@ -186,13 +189,13 @@ ENABLE_PERSISTENT_STORAGE=false   # wrong for any SteamCMD-installed game
 |--------|-------|-----|--------|------|-----|---------|
 | Valheim | `ghcr.io/lloesche/valheim-server` | 1024 | 4096 MB | UDP 2456 | yes | yes |
 | Unreal Tournament 99 | `roemer/ut99-server` | 512 | 1024 MB | UDP 7777 | no | yes |
-| Team Fortress Classic | `jives/hlds:tfc` | 256 | 512 MB | UDP 27015 | no | no |
-| Team Fortress 2 | `cm2network/tf2` | 1024 | 2048 MB | UDP 27015 | no | no |
+| Team Fortress Classic | *local build* (`jives/hlds:tfc`) | 256 | 512 MB | UDP 27015 | no | yes |
+| Team Fortress 2 | `cm2network/tf2` | 1024 | 2048 MB | UDP 27015 | no | yes |
 | Counter-Strike 1.6 | *local build* (`jives/hlds:cstrike`) | 256 | 512 MB | UDP 27015 | no | yes |
 | Counter-Strike: Source | *local build* (LinuxGSM) | 1024 | 2048 MB | UDP 27015 | yes | yes |
 | Counter-Strike 2 | `cm2network/cs2` | 2048 | 4096 MB | UDP 27015 | yes | yes |
 | Garry's Mod | *local build* (LinuxGSM) | 2048 | 4096 MB | UDP 27015 | yes | yes |
-| Left 4 Dead 2 | `left4devops/l4d2` | 512 | 2048 MB | UDP 27015 | no | no |
+| Left 4 Dead 2 | `left4devops/l4d2` | 512 | 2048 MB | UDP 27015 | no | yes |
 | Doom 2 (Zandronum) | `rcdailey/zandronum-server` | 256 | 512 MB | UDP 10666 | yes | no |
 | Quake 3 Arena | `inanimate/quake3` | 256 | 512 MB | UDP 27960 | yes | no |
 | Quake Live | `dpadgett/ql-docker` | 256 | 512 MB | UDP 27960 | no | no |
@@ -202,8 +205,9 @@ ENABLE_PERSISTENT_STORAGE=false   # wrong for any SteamCMD-installed game
 *Local build* means `IMAGE_URI` is unset: the `Dockerfile` layers a `respawn-init.sh` shim over the
 upstream image and is pushed to ECR. See [Contributing](#contributing).
 
-> **Security note.** `tfc`, `l4d2`, `rust`, and `tf2` still carry `changeme` placeholder credentials
-> in their config. Change them — ideally by migrating them to `SECRET_REFS` — before deploying.
+> **Security note.** Every credential in every service is now referenced via `SECRET_REFS` and
+> stored in Secrets Manager. `loader.ts` rejects a plaintext credential in `GAME_ENV_*` or
+> `CONTAINER_COMMAND` at config load, so this cannot regress silently.
 
 ---
 
@@ -254,6 +258,7 @@ Unknown keys are ignored; malformed ones fail fast at load.
 | `SECRET_REFS` | — | `ENV_VAR=<sm\|ssm>:<sourceId>[\|jsonKey]`, comma-separated |
 | `GAME_ENV_*` | — | Prefix stripped, passed as container env. **Not for secrets** |
 | `DEPLOY_PROMPTS` | — | `ENV_VAR:select:a\|b\|c` — asked at deploy, overrides `GAME_ENV_*` |
+| `REQUIRED_ENV_VARS` | — | Comma-separated container env vars the server cannot run without. Checked at deploy time |
 | `ENABLE_REDIS_SIDECAR` | `false` | Redis sidecar (Quake Live's minqlx uses this) |
 | `LOG_RETENTION_DAYS` | `14` | **Overridden by environment** — see below |
 | `AWS_ACCOUNT_ID` / `AWS_REGION` / `AWS_PROFILE` | — / `us-east-1` / — | Deploy target |
@@ -349,8 +354,8 @@ https://steamcommunity.com/dev/managegameservers using **AppID 440**.
 
 The server still accepts direct connections without a token, but won't be listed publicly.
 
-> `apps/tf2/.env` currently holds the token as `GAME_ENV_SRCDS_TOKEN`, which puts it in the task
-> definition in plaintext. Prefer `SECRET_REFS=SRCDS_TOKEN=ssm:/respawn/tf2/gslt`, as `cs2` does.
+TF2 currently runs **unlisted**: there is no `SRCDS_TOKEN` entry in its `SECRET_REFS`. To list it,
+store a token and append `,SRCDS_TOKEN=ssm:/respawn/tf2/gslt`. Its rcon password is already a secret.
 
 ### Doom 2
 
@@ -421,8 +426,8 @@ GAME_ENV_DEFAULT_MODE=coop       # coop, versus, realism, survival, scavenge
 GAME_ENV_DEFAULT_MAP=c1m1_hotel  # Dead Center campaign start
 ```
 
-> The RCON password ships as `GAME_ENV_RCON_PASSWORD=changeme` and lands in the task definition in
-> plaintext. Change it, and prefer moving it to `SECRET_REFS`.
+The RCON password comes from `SECRET_REFS` (`sm:respawn/l4d2/rcon`) — the image reads the same
+`RCON_PASSWORD` env var, so no shim is needed.
 
 ### Rust
 
@@ -464,9 +469,8 @@ pnpm respawn:status       # running tasks, public IPs
 ```
 
 > `respawn:synth`, `:diff`, `:deploy`, `:destroy`, and `:status` pass a **hardcoded `--service`
-> list** in `package.json`. It has drifted — `cs16`, `cs2`, `css`, and `gmod` are missing, so those
-> four are silently skipped. Add new services to those lists, or use the interactive `pnpm respawn`
-> menu, which discovers everything.
+> list** in `package.json`, currently naming all 14 servers. Add new services to those lists, or
+> use the interactive `pnpm respawn` menu, which discovers them automatically.
 
 ### Error handling: when a server won't come up
 

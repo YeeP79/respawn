@@ -16,6 +16,13 @@ export interface GameServerConfig {
   secretRefs: SecretRef[];
   deployPrompts: DeployPrompt[];
   gameEnvVars: Record<string, string>;
+  /**
+   * Container env vars the service cannot run without — a Steam GSLT, an admin
+   * Steam64 ID, an rcon password. Declared via `REQUIRED_ENV_VARS`. Checked at
+   * deploy time (not load time, so a service with an unset requirement still
+   * appears in the CLI and can be inspected). See `preflightDeploy`.
+   */
+  requiredEnvVars: string[];
   aws: AwsConfig;
   tags: Record<string, string>;
 }

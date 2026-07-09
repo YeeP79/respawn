@@ -60,6 +60,32 @@ function runAws(
 }
 
 /**
+ * Reports whether a referenced secret/parameter already exists.
+ *
+ * ECS resolves `secrets:` before starting the container and CDK only synthesises
+ * an ARN — it never checks existence — so a missing secret surfaces as an opaque
+ * `ResourceInitializationError` after a full deploy. Checking up front turns that
+ * into an actionable message. Never reads the value.
+ */
+export async function secretExists(opts: {
+  store: 'sm' | 'ssm';
+  sourceId: string;
+  region?: string;
+  profile?: string;
+}): Promise<boolean> {
+  const args =
+    opts.store === 'ssm'
+      ? ['ssm', 'get-parameter', '--name', opts.sourceId]
+      : ['secretsmanager', 'describe-secret', '--secret-id', opts.sourceId];
+
+  const res = await runAws(args, {
+    profile: opts.profile,
+    region: opts.region,
+  });
+  return res.exitCode === 0;
+}
+
+/**
  * Creates or updates a secret value in AWS Secrets Manager or SSM Parameter
  * Store (SecureString). Idempotent: existing secrets/parameters are overwritten.
  *

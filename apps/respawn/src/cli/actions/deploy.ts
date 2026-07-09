@@ -2,8 +2,13 @@ import { execSync } from 'node:child_process';
 import * as path from 'node:path';
 import { buildImage, tagImage, ecrLogin, pushImage } from '@respawn/docker-utils';
 import type { ActionResult, DiscoveredService, Environment } from '../../config/types.js';
+import {
+  findUnsatisfiedRequirements,
+  formatRequirementError,
+} from '../../config/preflight.js';
 import { runCdk } from '../../utils/cdk-runner.js';
 import { logger } from '../../utils/logger.js';
+import { secretExists } from '../../utils/secrets-runner.js';
 
 export interface DeployContext {
   service: DiscoveredService;
@@ -25,6 +30,64 @@ function getGitSha(): string {
   }
 }
 
+/**
+ * Refuses a deploy that would fail late or, worse, succeed into a broken server.
+ *
+ * Two classes of problem, both invisible to CDK: a REQUIRED_ENV_VARS entry with
+ * no real value (the task starts, the server silently misbehaves), and a
+ * SECRET_REFS entry naming a secret that does not exist (the task dies with
+ * ResourceInitializationError after a full deploy).
+ *
+ * @throws When any requirement is unsatisfied or any referenced secret is absent.
+ */
+async function preflight(ctx: DeployContext): Promise<void> {
+  const { config } = ctx.service;
+  const problems: string[] = [];
+
+  const missing = findUnsatisfiedRequirements(config, ctx.gameEnvOverrides);
+  if (missing.length > 0) {
+    problems.push(formatRequirementError(config, missing));
+  }
+
+  const region = config.aws.region;
+  const profile = ctx.profile ?? config.aws.profile;
+  const absent = (
+    await Promise.all(
+      config.secretRefs.map(async (ref) => ({
+        ref,
+        exists: await secretExists({
+          store: ref.store,
+          sourceId: ref.sourceId,
+          region,
+          profile,
+        }),
+      })),
+    )
+  ).filter((r) => !r.exists);
+
+  if (absent.length > 0) {
+    problems.push(
+      [
+        `${config.serviceName} references secrets that do not exist in ${region}:`,
+        ...absent.map(
+          ({ ref }) =>
+            `  - ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId}`,
+        ),
+        '',
+        'ECS resolves secrets before the container starts, so the task would fail',
+        'with ResourceInitializationError. Store the values first:',
+        '  pnpm respawn  ->  Secrets',
+      ].join('\n'),
+    );
+  }
+
+  if (problems.length > 0) {
+    throw new Error(`Preflight failed.\n\n${problems.join('\n\n')}`);
+  }
+
+  logger.debug(`Preflight passed for ${config.serviceName}`);
+}
+
 export async function deploy(ctx: DeployContext): Promise<ActionResult> {
   const start = Date.now();
   const { service, environment, workspaceRoot } = ctx;
@@ -38,6 +101,9 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       : {};
 
   try {
+    // Fail before building images or touching CloudFormation.
+    await preflight(ctx);
+
     // When IMAGE_URI is set, skip the build/push flow and deploy directly
     if (config.image.imageUri) {
       logger.info(`Using external image: ${config.image.imageUri}`);
