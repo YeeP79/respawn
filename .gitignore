@@ -59,3 +59,7 @@ Thumbs.db
 .github/instructions/nx.instructions.md
 
 vite.config.*.timestamp*
+
+# CDK synth artifacts (the root /cdk.out rule missed the nested app dir)
+cdk.out/
+cdk.context.json
