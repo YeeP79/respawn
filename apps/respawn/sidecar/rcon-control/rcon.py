@@ -9,10 +9,12 @@ Routing lives in the caller: one control sidecar fronts exactly one game server,
 and it learns which one from its environment (RCON_PROTOCOL, RCON_PORT). An MCP
 client selects the server by choosing which task to exec into.
 
-Two wire protocols, because the engines differ:
-  goldsrc  UDP on the game port. Challenge, then `rcon <challenge> "<pass>" <cmd>`.
-           The password is re-sent with every command (protocol limitation).
-  source   TCP, length-prefixed packets. Authenticate once per connection.
+Four wire protocols, because the engines differ:
+  goldsrc    UDP. Challenge, then `rcon <challenge> "<pass>" <cmd>`. The password
+             is re-sent with every command (protocol limitation).
+  source     TCP, length-prefixed packets. Authenticate once per connection.
+  q3         idTech3 (Quake 3 / Quake Live). One connectionless UDP packet.
+  zandronum  Stateful, Huffman-coded UDP with salted-MD5 auth (Doom 2 etc.).
 
 Exit codes: 0 on success, 1 on failure (auth rejected, timeout, bad protocol).
 """
@@ -56,6 +58,46 @@ def goldsrc_exec(host: str, port: int, password: str, command: str, timeout: flo
         if "Bad rcon_password" in body:
             raise RconError("rcon password rejected")
         return body.strip()
+    except socket.timeout as exc:
+        raise RconError(f"no reply from {host}:{port} within {timeout}s") from exc
+    finally:
+        sock.close()
+
+
+def q3_exec(host: str, port: int, password: str, command: str, timeout: float) -> str:
+    """idTech3 (Quake 3 / Quake Live) rcon: one connectionless UDP packet.
+
+    Request:  \\xff\\xff\\xff\\xff rcon <password> <command>
+    Reply:    \\xff\\xff\\xff\\xff print\\n <text>, which large replies fragment
+              across several packets — we read until the socket goes quiet.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        request = b"\xff\xff\xff\xffrcon " + f"{password} {command}".encode("latin-1")
+        sock.sendto(request, (host, port))
+
+        chunks: list[bytes] = []
+        while True:
+            try:
+                data, _ = sock.recvfrom(8192)
+            except socket.timeout:
+                break
+            # Each fragment is prefixed 0xFFFFFFFF and usually 'print\n'.
+            body = data[4:]
+            if body.startswith(b"print\n"):
+                body = body[len("print\n") :]
+            chunks.append(body)
+            if not chunks:  # first read must succeed; later ones may time out
+                break
+            sock.settimeout(0.4)  # short wait for continuation fragments
+
+        if not chunks:
+            raise RconError(f"no reply from {host}:{port}")
+        text = b"".join(chunks).decode("latin-1", errors="replace").strip()
+        if "Bad rconpassword" in text or "No rconpassword" in text:
+            raise RconError("rcon password rejected or not set on the server")
+        return text
     except socket.timeout as exc:
         raise RconError(f"no reply from {host}:{port} within {timeout}s") from exc
     finally:
@@ -112,7 +154,143 @@ def source_exec(host: str, port: int, password: str, command: str, timeout: floa
         sock.close()
 
 
-PROTOCOLS = {"goldsrc": goldsrc_exec, "source": source_exec}
+# --- Zandronum rcon ----------------------------------------------------------
+# A stateful, Huffman-coded UDP protocol with salted-MD5 auth. The Huffman tree
+# is lifted verbatim from zandronum/src/huffman/huffman.cpp; its codec honours a
+# 0xff "unencoded" prefix, so we can *send* without an encoder and only decode
+# replies. Flow (sv_rcon.cpp): BEGINCONNECTION -> SALT -> md5(salt+password) ->
+# COMMAND -> MESSAGE.
+_ZAN_TREE = bytes.fromhex(
+    "0000000180000000032622020150036e90430002014a03f38e2502037c3ab6000001240003dd"
+    "8303f5a30123037155000129014d03c7820001ce03b9990346760003030500000118000203c6"
+    "be3f02038bba4b00012c0203f0da380328270000020203f4f751410003097d03443c00000119"
+    "03bf8a03561100011703dcb20203a5c20e0100020200000201d003969db501de0203d8e6d300"
+    "020203fc8d0a2a000203868768016703bbe15f200000000000000139013d03b7ed000003e9ea"
+    "03f6cb0203fa934f0181000107038f88011403b394000000031c6a03655701420003b4db03e3"
+    "f100011a01fb03e5d6033645000000000003e7d4039cb0035d53000360fd031e0d00000203af"
+    "fe5e039f1b02010803cce24e000000036b58011f0389a9020203d7910604017f00016303d1d9"
+    "0003d5ee03b1aa01840000000203160c720202039ec5612d00012e017003aef90003e0660203"
+    "ab97c1000000030f100302a80131035b9200013003ad1d0003137e035cf200000000000003cd"
+    "c00203eb95ff0203dfb8f80000036cec036f5a02037573470000030b320003bc77017a03a7a2"
+    "01a00185037b15000002013b02039b9a622b00034c330203c97448020002036d64790203c3e8"
+    "120100020001a4020378bd490001c403efd203403e59000001210203e4a137020354982f0000"
+    "0203cfac8c0352a600033569013403cac8"
+)
+ZANDRONUM_RCON_PROTOCOL = 4
+CLRC_BEGINCONNECTION, CLRC_PASSWORD, CLRC_COMMAND = 52, 53, 54
+SVRC_OLDPROTOCOL, SVRC_BANNED, SVRC_SALT = 32, 33, 34
+SVRC_LOGGEDIN, SVRC_INVALIDPASSWORD, SVRC_MESSAGE = 35, 36, 37
+
+
+# A node is a 2-element list; a child is a literal byte (leaf) or a node (branch).
+_HuffNode = list
+
+
+def _zan_build_tree(data: bytes) -> _HuffNode:
+    pos = 0
+
+    def node() -> _HuffNode:
+        nonlocal pos
+        desc = data[pos]
+        pos += 1
+        children: _HuffNode = [None, None]
+        for i in (0, 1):
+            if desc & (1 << i):
+                children[i] = data[pos]
+                pos += 1
+            else:
+                children[i] = node()
+        return children
+
+    return node()
+
+
+_ZAN_ROOT = _zan_build_tree(_ZAN_TREE)
+_ZAN_REV = [int(f"{b:08b}"[::-1], 2) for b in range(256)]
+
+
+def _zan_decode(buf: bytes) -> bytes:
+    if buf[:1] == b"\xff":
+        return buf[1:]
+    bits = ((len(buf) - 1) << 3) - buf[0]
+    out = bytearray()
+    node: _HuffNode = _ZAN_ROOT
+    byte, left, read = 0, 0, 1
+    while bits > 0:
+        if left <= 0:
+            byte = _ZAN_REV[buf[read]]
+            read += 1
+            left = 8
+        child = node[(byte >> 7) & 1]
+        byte = (byte << 1) & 0xFF
+        left -= 1
+        bits -= 1
+        if isinstance(child, int):
+            out.append(child)
+            node = _ZAN_ROOT
+        else:
+            node = child
+    return bytes(out)
+
+
+def zandronum_exec(host: str, port: int, password: str, command: str, timeout: float) -> str:
+    import hashlib
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+
+    def send(payload: bytes) -> None:
+        sock.sendto(b"\xff" + payload, (host, port))  # 0xff = unencoded
+
+    def recv() -> bytes:
+        data, _ = sock.recvfrom(8192)
+        return _zan_decode(data)
+
+    try:
+        send(bytes([CLRC_BEGINCONNECTION, ZANDRONUM_RCON_PROTOCOL]))
+        reply = recv()
+        code = reply[0]
+        if code == SVRC_BANNED:
+            raise RconError("this host is banned from the server's rcon")
+        if code == SVRC_OLDPROTOCOL:
+            raise RconError("server rejected the rcon protocol version")
+        if code != SVRC_SALT:
+            raise RconError(f"unexpected rcon reply {code} (expected salt)")
+        salt = reply[1 : reply.index(b"\x00", 1)].decode("latin-1")
+
+        digest = hashlib.md5((salt + password).encode("latin-1")).hexdigest()
+        send(bytes([CLRC_PASSWORD]) + digest.encode("latin-1") + b"\x00")
+        reply = recv()
+        if reply[0] == SVRC_INVALIDPASSWORD:
+            raise RconError("rcon password rejected")
+        if reply[0] != SVRC_LOGGEDIN:
+            raise RconError(f"unexpected login reply {reply[0]}")
+
+        send(bytes([CLRC_COMMAND]) + command.encode("latin-1") + b"\x00")
+
+        # Collect SVRC_MESSAGE payloads until the socket goes quiet.
+        messages: list[str] = []
+        sock.settimeout(1.0)
+        while True:
+            try:
+                reply = recv()
+            except socket.timeout:
+                break
+            if reply and reply[0] == SVRC_MESSAGE:
+                messages.append(reply[1 : reply.index(b"\x00", 1)].decode("latin-1"))
+        return "".join(messages).strip()
+    except socket.timeout as exc:
+        raise RconError(f"no reply from {host}:{port} within {timeout}s") from exc
+    finally:
+        sock.close()
+
+
+PROTOCOLS = {
+    "goldsrc": goldsrc_exec,
+    "source": source_exec,
+    "q3": q3_exec,
+    "zandronum": zandronum_exec,
+}
 
 
 def main() -> int:
