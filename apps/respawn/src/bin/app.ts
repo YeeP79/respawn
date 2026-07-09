@@ -43,18 +43,24 @@ const discoveredServices = serviceNames.map((name) => {
   return { name, path: servicePath, config };
 });
 
-// Split the REQUESTED services into ECR-based and IMAGE_URI-based (these get
-// per-service stacks).
-const ecrServices = discoveredServices.filter((s) => !s.config.image.imageUri);
-const imageUriServices = discoveredServices.filter((s) => !!s.config.image.imageUri);
-
-// The shared stack's ECR repos must cover EVERY local-build service, not just the
-// one being deployed. Otherwise deploying service B rewrites the shared stack to
-// contain only B's repo, and CloudFormation tries to delete A's ECR export —
-// which A's still-deployed stack depends on — and the update rolls back.
-const allEcrServices = discoverServices(workspaceRoot, environment).filter(
-  (s) => !s.config.image.imageUri,
+// EVERY service stack must be synthesized on every run, even when deploying just
+// one, so the shared stack's exports stay stable. CDK auto-generates a cross-stack
+// export for a repo/VPC only when a stack references it in this same synth; if
+// service A's stack is absent, its export disappears from the shared template, and
+// CloudFormation refuses to remove an export that A's still-deployed stack imports
+// (the update rolls back). The `stacks` argument to `cdk deploy` still limits what
+// actually deploys — synthesizing all of them costs nothing.
+//
+// Requested services keep loud config errors (discoveredServices threw on load);
+// the rest come from discovery, which skips a broken .env with a warning.
+const requestedNames = new Set(serviceNames);
+const otherServices = discoverServices(workspaceRoot, environment).filter(
+  (s) => !requestedNames.has(s.name),
 );
+const allServices = [...discoveredServices, ...otherServices];
+
+const allEcrServices = allServices.filter((s) => !s.config.image.imageUri);
+const allImageUriServices = allServices.filter((s) => !!s.config.image.imageUri);
 
 // Shared stack (VPC, ECR repos) — a repo for every local-build service.
 const sharedStack = new SharedStack(app, `RespawnShared-${environment}`, {
@@ -67,7 +73,7 @@ const sharedStack = new SharedStack(app, `RespawnShared-${environment}`, {
 });
 
 // Per-service stacks — ECR-based services
-for (const svc of ecrServices) {
+for (const svc of allEcrServices) {
   const ecrRepo = sharedStack.ecrRepos.get(svc.name);
   if (!ecrRepo) {
     throw new Error(`No ECR repo found for service: ${svc.name}`);
@@ -77,7 +83,9 @@ for (const svc of ecrServices) {
     config: svc.config,
     vpc: sharedStack.vpc,
     ecrRepository: ecrRepo.repository,
-    imageTag,
+    // Only the requested service actually deploys, so its tag is the real one;
+    // others are synthesized but not deployed, so their tag is immaterial.
+    imageTag: requestedNames.has(svc.name) ? imageTag : `${environment}-latest`,
     env: {
       account: process.env['CDK_DEFAULT_ACCOUNT'],
       region: svc.config.aws.region,
@@ -88,7 +96,7 @@ for (const svc of ecrServices) {
 }
 
 // Per-service stacks — IMAGE_URI-based services (no ECR repo needed)
-for (const svc of imageUriServices) {
+for (const svc of allImageUriServices) {
   const serviceStack = new GameServerStack(app, `Respawn-${environment}-${svc.name}`, {
     config: svc.config,
     vpc: sharedStack.vpc,
