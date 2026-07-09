@@ -10,11 +10,11 @@
     "docker-build": "nx run-many -t docker-build",
     "graph": "nx graph",
     "respawn": "nx run respawn:cdk --profile=respawn",
-    "respawn:synth": "nx run respawn:cdk --nonInteractive --action=synth --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
-    "respawn:diff": "nx run respawn:cdk --nonInteractive --action=diff --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
-    "respawn:deploy": "nx run respawn:cdk --nonInteractive --action=deploy --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
-    "respawn:destroy": "nx run respawn:cdk --nonInteractive --action=destroy --profile=respawn --environment=dev --force --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust",
-    "respawn:status": "nx run respawn:cdk --nonInteractive --action=status --profile=respawn --environment=dev --service=valheim,ut99,tfc,tf2,doom2,quake3,quakelive,7dtd,l4d2,rust"
+    "respawn:synth": "nx run respawn:cdk --nonInteractive --action=synth --profile=respawn --environment=dev --service=7dtd,cs16,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,ut99,valheim",
+    "respawn:diff": "nx run respawn:cdk --nonInteractive --action=diff --profile=respawn --environment=dev --service=7dtd,cs16,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,ut99,valheim",
+    "respawn:deploy": "nx run respawn:cdk --nonInteractive --action=deploy --profile=respawn --environment=dev --service=7dtd,cs16,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,ut99,valheim",
+    "respawn:destroy": "nx run respawn:cdk --nonInteractive --action=destroy --profile=respawn --environment=dev --force --service=7dtd,cs16,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,ut99,valheim",
+    "respawn:status": "nx run respawn:cdk --nonInteractive --action=status --profile=respawn --environment=dev --service=7dtd,cs16,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,ut99,valheim"
   },
   "private": true,
   "devDependencies": {

@@ -432,4 +432,71 @@ describe('loadConfig', () => {
 
     expect(config.image.imageUri).toBeUndefined();
   });
+
+  describe('plaintext secret rejection', () => {
+    function load(name: string, content: string) {
+      const dir = path.join(FIXTURES_DIR, name);
+      writeEnvFile(dir, `SERVICE_NAME=${name}\n${content}`);
+      return () => loadConfig(dir, 'dev');
+    }
+
+    it.each([
+      ['GAME_ENV_RCON_PASSWORD=changeme', 'RCON_PASSWORD'],
+      ['GAME_ENV_SRCDS_TOKEN=abc123', 'SRCDS_TOKEN'],
+      ['GAME_ENV_SRCDS_RCONPW=abc123', 'SRCDS_RCONPW'],
+      ['GAME_ENV_SERVER_PASS=hunter2', 'SERVER_PASS'],
+      ['GAME_ENV_UT_ADMINPWD=hunter2', 'UT_ADMINPWD'],
+    ])('rejects %s as a plaintext game env var', (line, key) => {
+      expect(load(`env-${key}`, line)).toThrow(/looks like a credential/);
+    });
+
+    it('names SECRET_REFS as the remedy', () => {
+      expect(load('remedy', 'GAME_ENV_RCON_PASSWORD=changeme')).toThrow(
+        /SECRET_REFS=RCON_PASSWORD=sm:respawn\/remedy\/rcon_password/,
+      );
+    });
+
+    it.each([
+      '+rcon_password changeme',
+      '+sv_password hunter2',
+      '--api-key=abc123',
+    ])('rejects %s in CONTAINER_COMMAND', (fragment) => {
+      expect(load('cmd', `CONTAINER_COMMAND=+map de_dust2 ${fragment}`)).toThrow(
+        /looks like a credential/,
+      );
+    });
+
+    it('allows non-secret names that merely contain "rcon"', () => {
+      const config = load(
+        'rcon-port',
+        'GAME_ENV_RUST_RCON_PORT=28016\nGAME_ENV_RUST_RCON_WEB=1',
+      )();
+      expect(config.gameEnvVars['RUST_RCON_PORT']).toBe('28016');
+    });
+
+    it('allows an ordinary CONTAINER_COMMAND', () => {
+      const config = load(
+        'plain-cmd',
+        'CONTAINER_COMMAND=+log on +maxplayers 16 +map de_dust2 +sv_lan 0',
+      )();
+      expect(config.container.command).toContain('+maxplayers');
+    });
+
+    it('allows a credential supplied via SECRET_REFS', () => {
+      const config = load(
+        'via-secret',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/via-secret/rcon',
+      )();
+      expect(config.secretRefs[0]?.containerEnvVar).toBe('RCON_PASSWORD');
+    });
+
+    it('rejects a var set by both GAME_ENV_ and SECRET_REFS', () => {
+      expect(
+        load(
+          'dupe',
+          'GAME_ENV_ADMIN_ID=123\nSECRET_REFS=ADMIN_ID=sm:respawn/dupe/admin',
+        ),
+      ).toThrow(/set by both/);
+    });
+  });
 });

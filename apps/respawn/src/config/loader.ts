@@ -231,7 +231,84 @@ function parseCommand(value: string | undefined): string[] | undefined {
   return value.split(/\s+/).filter((s) => s.length > 0);
 }
 
+function parseRequiredEnvVars(value: string | undefined): string[] {
+  if (value === undefined || value === '') return [];
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+// Substrings that mark a name as holding a credential. Matched against the name
+// with separators stripped, so RCON_PASSWORD, rcon_password and SRCDS_RCONPW all
+// hit. Deliberately does NOT include "RCON": RUST_RCON_PORT and RUST_RCON_WEB are
+// legitimate plaintext settings.
+const SECRET_LIKE_SUBSTRINGS = [
+  'PASS',
+  'PASSWD',
+  'PASSPHRASE',
+  'PWD',
+  'RCONPW',
+  'SECRET',
+  'TOKEN',
+  'GSLT',
+  'APIKEY',
+  'PRIVATEKEY',
+  'CREDENTIAL',
+];
+
+function isSecretLike(name: string): boolean {
+  const normalized = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return SECRET_LIKE_SUBSTRINGS.some((s) => normalized.includes(s));
+}
+
+/**
+ * Rejects credentials supplied as plaintext config. `GAME_ENV_*` and
+ * `CONTAINER_COMMAND` both end up in the ECS task definition, readable by anyone
+ * with ECS read access; the command is additionally visible in `ps` inside the
+ * container. Secrets belong in SECRET_REFS, which ECS injects at container start.
+ * See AGENT_PROMPT.md §7.
+ */
+function validateNoPlaintextSecrets(config: GameServerConfig): void {
+  for (const key of Object.keys(config.gameEnvVars)) {
+    if (isSecretLike(key)) {
+      throw new Error(
+        `GAME_ENV_${key} looks like a credential and would be stored in plaintext ` +
+          `in the ECS task definition. Move it to SECRET_REFS instead:\n` +
+          `  SECRET_REFS=${key}=sm:respawn/${config.serviceName}/${key.toLowerCase()}`,
+      );
+    }
+  }
+
+  for (const arg of config.container.command ?? []) {
+    // Strip leading flag markers (+rcon_password, -rcon_password, --password=x)
+    // and any inline value, leaving the bare option name to test.
+    const name = arg.replace(/^[+-]{1,2}/, '').split('=')[0]!;
+    if (name && isSecretLike(name)) {
+      throw new Error(
+        `CONTAINER_COMMAND contains "${arg}", which looks like a credential. It would ` +
+          `be stored in plaintext in the ECS task definition and visible in \`ps\`.\n` +
+          `Move it to SECRET_REFS and have the container's entrypoint (see apps/cs16/` +
+          `respawn-init.sh) write it into the game's config file at startup.`,
+      );
+    }
+  }
+
+  // A name in both maps would be injected twice — ECS rejects the task definition.
+  const secretVars = new Set(config.secretRefs.map((r) => r.containerEnvVar));
+  for (const key of Object.keys(config.gameEnvVars)) {
+    if (secretVars.has(key)) {
+      throw new Error(
+        `"${key}" is set by both GAME_ENV_${key} and SECRET_REFS. Remove the ` +
+          `GAME_ENV_ entry — the secret already provides that container env var.`,
+      );
+    }
+  }
+}
+
 function validate(config: GameServerConfig): void {
+  validateNoPlaintextSecrets(config);
+
   if (!VALID_CPU_VALUES.includes(config.container.cpu)) {
     throw new Error(
       `Invalid CPU value: ${config.container.cpu}. Must be one of: ${VALID_CPU_VALUES.join(', ')}`,
@@ -418,6 +495,7 @@ export function loadConfig(
     secretRefs: parseSecretRefs(env['SECRET_REFS']),
     deployPrompts: parseDeployPrompts(env['DEPLOY_PROMPTS']),
     gameEnvVars: parseGameEnvVars(env),
+    requiredEnvVars: parseRequiredEnvVars(env['REQUIRED_ENV_VARS']),
 
     aws: {
       accountId: env['AWS_ACCOUNT_ID'] || undefined,
