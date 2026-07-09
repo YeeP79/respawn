@@ -55,10 +55,10 @@ function parseProtocol(value: string | undefined): 'TCP' | 'UDP' | undefined {
 
 function parseCheckMethod(
   value: string | undefined,
-): 'netstat' | 'http' | undefined {
+): 'netstat' | 'http' | 'a2s' | undefined {
   if (value === undefined || value === '') return undefined;
   const lower = value.toLowerCase();
-  if (lower === 'netstat' || lower === 'http') return lower;
+  if (lower === 'netstat' || lower === 'http' || lower === 'a2s') return lower;
   return undefined;
 }
 

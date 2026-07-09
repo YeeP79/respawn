@@ -125,7 +125,14 @@ export interface IdleShutdownConfig {
   enabled: boolean;
   timeoutMinutes: number;
   checkIntervalSeconds: number;
-  checkMethod: 'netstat' | 'http';
+  /**
+   * How the idle sidecar decides whether anyone is playing.
+   * - `a2s`: query the game (GoldSrc/Source). The only reliable option for them.
+   * - `netstat`: count established sockets. Blind to UDP games that use one
+   *   unconnected socket for all clients.
+   * - `http`: poll `statusEndpoint` for a player/connection count.
+   */
+  checkMethod: 'netstat' | 'http' | 'a2s';
   statusEndpoint?: string;
 }
 

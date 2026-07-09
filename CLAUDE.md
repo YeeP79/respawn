@@ -167,6 +167,16 @@ The batch scripts in `package.json` name each service explicitly — currently a
 easy to forget when adding a server, and a missing name is skipped silently. Add yours, or
 use the interactive `pnpm respawn` menu, which discovers them properly.
 
+### `netstat` idle detection is blind to UDP games
+
+GoldSrc/Source servers hand every client a single unconnected UDP socket (verified:
+`/proc/net/udp` has exactly one entry with 16 slots free), so `ss -tun state established`
+reports zero however many people are playing. Use `IDLE_CHECK_METHOD=a2s`, which asks the
+game for its own player count. `netstat` remains correct only for TCP games.
+
+The sidecar treats a failed A2S query as **unknown**, not empty — it holds the idle timer
+rather than scale a populated server to zero on one dropped packet.
+
 ### CPU and memory must be a valid Fargate pair
 
 `loader.ts` validates against the AWS matrix and fails fast. `CPU=256` allows 512–2048 MiB;

@@ -433,6 +433,40 @@ describe('loadConfig', () => {
     expect(config.image.imageUri).toBeUndefined();
   });
 
+  describe('idle check method', () => {
+    it.each([
+      ['netstat', 'netstat'],
+      ['http', 'http'],
+      ['a2s', 'a2s'],
+      ['A2S', 'a2s'],
+    ])('accepts %s', (given, expected) => {
+      const dir = path.join(FIXTURES_DIR, `idle-${given}`);
+      const extra = given.toLowerCase() === 'http'
+        ? '\nIDLE_STATUS_ENDPOINT=http://localhost/status.json'
+        : '';
+      writeEnvFile(dir, `SERVICE_NAME=idle\nIDLE_CHECK_METHOD=${given}${extra}`);
+      expect(loadConfig(dir, 'dev').idleShutdown.checkMethod).toBe(expected);
+    });
+
+    it('falls back to the default for an unknown method', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-bogus');
+      writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_CHECK_METHOD=carrier-pigeon');
+      expect(loadConfig(dir, 'dev').idleShutdown.checkMethod).toBe('netstat');
+    });
+
+    it('still requires a status endpoint for http', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-http-bare');
+      writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_CHECK_METHOD=http');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/statusEndpoint is required/);
+    });
+
+    it('does not require a status endpoint for a2s', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-a2s-bare');
+      writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_CHECK_METHOD=a2s');
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+  });
+
   describe('plaintext secret rejection', () => {
     function load(name: string, content: string) {
       const dir = path.join(FIXTURES_DIR, name);

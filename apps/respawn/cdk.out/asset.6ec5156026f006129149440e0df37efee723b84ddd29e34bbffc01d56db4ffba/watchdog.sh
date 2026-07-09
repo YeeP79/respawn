@@ -25,11 +25,7 @@ if [ -n "$EXTRA_PORTS" ]; then
 fi
 
 get_connection_count() {
-  if [ "$CHECK_METHOD" = "a2s" ]; then
-    # Ask the game how many humans are on. Prints -1 when the query fails, which
-    # the caller treats as "unknown" rather than "empty".
-    python3 /usr/local/bin/a2s_players.py 127.0.0.1 "$PORT" 2>/dev/null || echo "-1"
-  elif [ "$CHECK_METHOD" = "http" ]; then
+  if [ "$CHECK_METHOD" = "http" ]; then
     if [ -z "$STATUS_ENDPOINT" ]; then
       echo "[watchdog] ERROR: IDLE_STATUS_ENDPOINT is required for http check method" >&2
       echo "0"
@@ -67,26 +63,19 @@ discover_service_info() {
 
   local task_meta
   task_meta=$(curl -s --max-time 5 "${metadata_uri}/task" 2>/dev/null)
-  CLUSTER=$(echo "$task_meta" | jq -r '.Cluster // ""' 2>/dev/null)
-  TASK_ARN=$(echo "$task_meta" | jq -r '.TaskARN // ""' 2>/dev/null)
+  CLUSTER=$(echo "$task_meta" | jq -r '.Cluster' 2>/dev/null)
+  TASK_ARN=$(echo "$task_meta" | jq -r '.TaskARN' 2>/dev/null)
 
   if [ -z "$CLUSTER" ] || [ "$CLUSTER" = "null" ]; then
     echo "[watchdog] WARNING: Could not discover cluster info" >&2
     return 1
   fi
 
-  # The v4 task metadata exposes the service name as `ServiceName`. There is no
-  # `TaskGroup` field — reading it yielded an empty SERVICE_NAME, which made
-  # scale_to_zero bail out and the service never scaled down. Fall back to
-  # TaskGroup ("service:<name>") in case a future/other agent version supplies it.
-  SERVICE_NAME=$(echo "$task_meta" \
-    | jq -r '(.ServiceName // .TaskGroup // "") | sub("^service:"; "")' 2>/dev/null || echo "")
-
-  if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" = "null" ]; then
-    echo "[watchdog] WARNING: Could not discover service name from task metadata" >&2
-    SERVICE_NAME=""
-    return 1
-  fi
+  # Discover service name from task tags or task group
+  local task_group
+  task_group=$(echo "$task_meta" | jq -r '.TaskGroup // ""' 2>/dev/null || echo "")
+  # Task group is typically "service:<service-name>"
+  SERVICE_NAME="${task_group#service:}"
 
   echo "[watchdog] Discovered cluster=${CLUSTER}, service=${SERVICE_NAME}"
   return 0
@@ -100,17 +89,14 @@ scale_to_zero() {
     return 1
   fi
 
-  if aws ecs update-service \
+  aws ecs update-service \
     --cluster "$CLUSTER" \
     --service "$SERVICE_NAME" \
     --desired-count 0 \
-    --no-cli-pager >/dev/null 2>&1; then
-    echo "[watchdog] Scale-to-zero command sent."
-    return 0
-  fi
+    --no-cli-pager \
+    2>&1 || echo "[watchdog] Failed to scale service to 0"
 
-  echo "[watchdog] Failed to scale service to 0" >&2
-  return 1
+  echo "[watchdog] Scale-to-zero command sent."
 }
 
 # Wait a bit for the service to start before discovering metadata
@@ -124,32 +110,23 @@ discover_service_info || echo "[watchdog] Will retry service discovery later."
 while $running; do
   connections=$(get_connection_count)
 
-  if [ "$connections" -lt 0 ] 2>/dev/null; then
-    # Unknown, not empty. Hold the idle timer rather than risk scaling a
-    # populated server to zero because one query timed out.
-    echo "[watchdog] Could not determine player count; holding idle timer at ${idle_seconds}s." >&2
-  elif [ "$connections" -gt 0 ] 2>/dev/null; then
+  if [ "$connections" -gt 0 ] 2>/dev/null; then
     if [ "$idle_seconds" -gt 0 ]; then
-      echo "[watchdog] Activity detected (${connections} players/connections). Resetting idle timer."
+      echo "[watchdog] Activity detected (${connections} connections). Resetting idle timer."
     fi
     idle_seconds=0
   else
     idle_seconds=$((idle_seconds + CHECK_INTERVAL))
-    echo "[watchdog] No players. Idle for ${idle_seconds}/${IDLE_TIMEOUT_SECONDS}s"
+    echo "[watchdog] No connections. Idle for ${idle_seconds}/${IDLE_TIMEOUT_SECONDS}s"
   fi
 
   if [ "$idle_seconds" -ge "$IDLE_TIMEOUT_SECONDS" ]; then
-    # Retry discovery if EITHER value is missing — the cluster resolves even when
-    # the service name does not, so checking only CLUSTER never retried.
-    if [ -z "${CLUSTER:-}" ] || [ -z "${SERVICE_NAME:-}" ]; then
+    # Retry service discovery if we haven't succeeded yet
+    if [ -z "${CLUSTER:-}" ]; then
       discover_service_info || true
     fi
-    if scale_to_zero; then
-      break
-    fi
-    # Scaling failed. Keep watching rather than exiting silently: exiting a
-    # non-essential container leaves the game server billing with no watchdog.
-    echo "[watchdog] Will retry scale-to-zero on the next interval." >&2
+    scale_to_zero
+    break
   fi
 
   sleep "$CHECK_INTERVAL" &

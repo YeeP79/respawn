@@ -173,7 +173,7 @@ ENABLE_PERSISTENT_STORAGE=false   # wrong for any SteamCMD-installed game
 
 ## Core Features
 
-- **Scale to zero:** an idle sidecar polls the game port and stops the task after `IDLE_TIMEOUT_MINUTES`
+- **Scale to zero:** an idle sidecar asks the game how many players are on, and stops the task after `IDLE_TIMEOUT_MINUTES`
 - **Zero-code onboarding:** three files in `apps/<name>/` and the CLI finds it
 - **First-class secrets:** `SECRET_REFS` → Secrets Manager / SSM → ECS `secrets:`, never `environment:`
 - **Persistent worlds:** optional EFS volume, transit-encrypted, IAM-authorised
@@ -243,7 +243,7 @@ Unknown keys are ignored; malformed ones fail fast at load.
 |-----|---------|-------------|
 | `ENABLE_IDLE_SHUTDOWN` | `true` | Scale to zero when idle |
 | `IDLE_TIMEOUT_MINUTES` | `30` | Quiet minutes before stopping |
-| `IDLE_CHECK_METHOD` | `netstat` | `netstat` (UDP games) or `http` (needs `IDLE_STATUS_ENDPOINT`) |
+| `IDLE_CHECK_METHOD` | `netstat` | `a2s` (GoldSrc/Source), `http` (needs `IDLE_STATUS_ENDPOINT`), or `netstat` |
 | `IDLE_CHECK_INTERVAL_SECONDS` | `60` | Poll interval |
 | `USE_FARGATE_SPOT` | `true` | **Overridden by environment** — see below |
 | `DESIRED_COUNT` | `1` | Task count |
@@ -480,6 +480,8 @@ pnpm respawn:status       # running tasks, public IPs
 | Task stops with `ResourceInitializationError` | A `SECRET_REFS` entry names a secret that doesn't exist |
 | Config rejected at load with `Invalid memory …` | `CPU`/`MEMORY` are not a legal Fargate pair |
 | Long cold start on every wake | `ENABLE_PERSISTENT_STORAGE=false` on a SteamCMD game |
+| Server never scales to zero | Sidecar could not resolve the ECS service name — check its logs |
+| Server scaled to zero mid-game | `IDLE_CHECK_METHOD=netstat` on a UDP game; use `a2s` |
 | `docker build` cannot find a `COPY` source | Build context is the repo root; use `apps/<name>/…` |
 | `.env` change to spot or log retention has no effect | Overridden by the environment (`dev`/`staging`/`prod`) |
 

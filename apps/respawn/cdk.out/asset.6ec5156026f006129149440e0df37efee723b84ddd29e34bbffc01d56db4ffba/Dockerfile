@@ -5,11 +5,9 @@ RUN apk add --no-cache \
     curl \
     jq \
     iproute2 \
-    aws-cli \
-    python3
+    aws-cli
 
 COPY watchdog.sh /usr/local/bin/watchdog.sh
-COPY a2s_players.py /usr/local/bin/a2s_players.py
-RUN chmod +x /usr/local/bin/watchdog.sh /usr/local/bin/a2s_players.py
+RUN chmod +x /usr/local/bin/watchdog.sh
 
 ENTRYPOINT ["/usr/local/bin/watchdog.sh"]
