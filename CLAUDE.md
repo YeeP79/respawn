@@ -106,8 +106,8 @@ Full spec: `artifacts/AGENT_PROMPT.md` §7.
 ### A service without `.env` is silently skipped
 
 `stack-discovery.ts` skips any `apps/*` directory lacking `.env` — no error, it just
-never appears in the CLI. `apps/gmod` and `apps/cs2` are committed in exactly this state.
-If your new server "isn't showing up", this is why.
+never appears in the CLI. If your new server "isn't showing up", this is why. (`.env` is
+gitignored, so a fresh clone has none: `cp .env.example .env` per service.)
 
 ### Secrets must never touch `CONTAINER_COMMAND` or `GAME_ENV_*`
 
@@ -123,15 +123,27 @@ GAME_ENV_RCON_PASSWORD=hunter2
 SECRET_REFS=RCON_PASSWORD=sm:respawn/cs16/rcon
 ```
 
-`apps/tfc`, `apps/l4d2`, `apps/rust`, and `apps/tf2` still violate this with `changeme`
-placeholders. Do not copy them.
+`loader.ts` enforces this: a credential-looking name in either place is rejected at config
+load. The heuristic matches `PASSWORD`/`TOKEN`/`PWD`/`GSLT` but deliberately not `RCON`, so
+`RUST_RCON_PORT` still loads. If the image takes config only on the command line, add a
+`respawn-init.sh` shim (see `apps/cs16`, `apps/tfc`).
 
 ### Every `SECRET_REFS` entry must exist before the first deploy
 
 ECS resolves secrets *before* starting the container, and CDK only synthesizes an ARN —
 it never checks existence. A referenced-but-absent secret fails the task with
 `ResourceInitializationError`. Making a secret optional means **deleting its entry**, not
-leaving the store empty. Run the `Secrets` CLI action first.
+leaving the store empty. `deploy()` preflights this now, so it fails fast with a clear
+message rather than after a full deploy — run the `Secrets` CLI action first.
+
+### Anything the server cannot run without goes in `REQUIRED_ENV_VARS`
+
+A GSLT, an admin Steam64 ID, an rcon password. Checked by `preflight()` in `deploy.ts`
+against placeholders (`changeme`, `todo`, `<your-id>`, empty) as well as absence.
+
+This is checked at **deploy** time, not load time, and that is deliberate:
+`stack-discovery.ts` catches a config error and merely *warns*, so a service that throws
+during load silently disappears from the CLI menu. A missing requirement must be loud.
 
 ### The `jsonKey` delimiter is `|`, not `#`
 
@@ -151,9 +163,9 @@ Also check the base image's `USER` before adding `RUN chmod +x` — `jives/hlds`
 
 ### `pnpm respawn:*` scripts hardcode a `--service` list
 
-The batch scripts in `package.json` name each service explicitly, and the list has drifted:
-`cs16`, `cs2`, `css`, and `gmod` are all missing. Add new servers there, or use the
-interactive `pnpm respawn` menu, which discovers them properly.
+The batch scripts in `package.json` name each service explicitly — currently all 14. It is
+easy to forget when adding a server, and a missing name is skipped silently. Add yours, or
+use the interactive `pnpm respawn` menu, which discovers them properly.
 
 ### CPU and memory must be a valid Fargate pair
 
