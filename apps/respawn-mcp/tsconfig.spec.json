@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../dist/apps/respawn-mcp-test",
+    "tsBuildInfoFile": "../../dist/apps/respawn-mcp-test/tsconfig.spec.tsbuildinfo",
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.spec.ts", "src/**/*.test.ts"]
+}

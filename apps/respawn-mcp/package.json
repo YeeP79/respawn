@@ -1,0 +1,11 @@
+{
+  "name": "@respawn/mcp",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "respawn-mcp": "./dist/index.js" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.24.1"
+  }
+}

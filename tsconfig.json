@@ -3,8 +3,17 @@
   "compileOnSave": false,
   "files": [],
   "references": [
-    { "path": "libs/shared-types" },
-    { "path": "libs/docker-utils" },
-    { "path": "apps/respawn" }
+    {
+      "path": "./libs/shared-types"
+    },
+    {
+      "path": "./libs/docker-utils"
+    },
+    {
+      "path": "./apps/respawn"
+    },
+    {
+      "path": "./apps/respawn-mcp"
+    }
   ]
 }

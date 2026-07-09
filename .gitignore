@@ -63,3 +63,6 @@ vite.config.*.timestamp*
 # CDK synth artifacts (the root /cdk.out rule missed the nested app dir)
 cdk.out/
 cdk.context.json
+
+# In-package build output (respawn-mcp)
+apps/*/dist/
