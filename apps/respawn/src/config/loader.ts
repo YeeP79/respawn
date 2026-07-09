@@ -73,6 +73,17 @@ function parseCheckMethod(
   return undefined;
 }
 
+function parseRconProtocol(
+  value: string | undefined,
+): 'goldsrc' | 'source' | 'q3' | 'zandronum' | undefined {
+  if (value === undefined || value === '') return undefined;
+  const lower = value.toLowerCase();
+  if (lower === 'goldsrc' || lower === 'source' || lower === 'q3' || lower === 'zandronum') {
+    return lower;
+  }
+  return undefined;
+}
+
 function parseGameEnvVars(env: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = {};
   const prefix = 'GAME_ENV_';
@@ -576,12 +587,7 @@ export function loadConfig(
       enabled:
         parseBoolean(env['ENABLE_RCON_CONTROL']) ??
         DEFAULT_RCON_CONTROL.enabled,
-      protocol:
-        (env['RCON_PROTOCOL']?.toLowerCase() === 'source'
-          ? 'source'
-          : env['RCON_PROTOCOL']?.toLowerCase() === 'goldsrc'
-            ? 'goldsrc'
-            : undefined) ?? DEFAULT_RCON_CONTROL.protocol,
+      protocol: parseRconProtocol(env['RCON_PROTOCOL']) ?? DEFAULT_RCON_CONTROL.protocol,
       passwordSecretVar:
         env['RCON_PASSWORD_VAR'] || DEFAULT_RCON_CONTROL.passwordSecretVar,
       port: parseNumber(env['RCON_PORT']),

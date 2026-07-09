@@ -177,8 +177,8 @@ export interface RedisConfig {
  */
 export interface RconControlConfig {
   enabled: boolean;
-  /** Wire protocol: 'goldsrc' (UDP, GoldSrc) or 'source' (TCP, Source/Source 2). */
-  protocol: 'goldsrc' | 'source';
+  /** Wire protocol the rcon-control sidecar speaks to the game. */
+  protocol: 'goldsrc' | 'source' | 'q3' | 'zandronum';
   /** Container env var (from SECRET_REFS) holding the rcon password. */
   passwordSecretVar: string;
   /** Port the game answers rcon on. Defaults to the container port. */
