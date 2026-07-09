@@ -45,6 +45,48 @@ describe('parseManifest', () => {
   it('rejects an unknown engine', () => {
     expect(() => parseManifest({ engine: 'quakeworld' }, 'x')).toThrow();
   });
+
+  it('keeps an arg\'s allowed `values`', () => {
+    const m = parseManifest(
+      {
+        commands: [
+          {
+            name: 'add_bot',
+            description: 'd',
+            rcon: 'addbot {skill}',
+            args: { skill: { values: ['1', '2'] } },
+          },
+        ],
+      },
+      'x',
+    );
+    expect(m.commands[0]!.args!.skill!.values).toEqual(['1', '2']);
+  });
+
+  it('rejects a misspelled arg key rather than dropping it', () => {
+    // `enum` was the old spelling; a non-strict schema silently discarded it and
+    // the LLM lost the constraint with nothing in the build to say so.
+    expect(() =>
+      parseManifest(
+        {
+          commands: [
+            {
+              name: 'add_bot',
+              description: 'd',
+              rcon: 'addbot {skill}',
+              args: { skill: { enum: ['1', '2'] } },
+            },
+          ],
+        },
+        'x',
+      ),
+    ).toThrow();
+  });
+
+  it('rejects an unknown key on a cvar and on the manifest root', () => {
+    expect(() => parseManifest({ cvars: [{ name: 'g', vals: ['1'] }] }, 'x')).toThrow();
+    expect(() => parseManifest({ notez: 'typo' }, 'x')).toThrow();
+  });
 });
 
 describe('parseMapList', () => {

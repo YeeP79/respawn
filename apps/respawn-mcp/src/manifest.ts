@@ -12,19 +12,25 @@ export const CommandSchema = z.object({
   rcon: z.string(),
   args: z
     .record(
-      z.object({
-        description: z.string().optional(),
-        /** Allowed values; presented to the LLM as an enum. */
-        enum: z.array(z.string()).optional(),
-        type: z.enum(['string', 'int', 'float', 'bool']).optional(),
-      }),
+      z
+        .object({
+          description: z.string().optional(),
+          /** Allowed values; presented to the LLM as an enum. Spelled as in CvarSchema. */
+          values: z.array(z.string()).optional(),
+          type: z.enum(['string', 'int', 'float', 'bool']).optional(),
+        })
+        // An arg spec is pure data handed to the LLM — nothing here is read by code,
+        // so a misspelled key would be silently dropped and the constraint lost.
+        // `values` was once `enum` here while cvars said `values`; every manifest
+        // wrote `values` and quake3's skill 1-5 enum vanished without a word.
+        .strict(),
     )
     .optional(),
   /** Name of the mod that adds this command, if any (e.g. "amxmodx"). */
   mod: z.string().optional(),
   /** Flag destructive actions so the LLM (and the operator) treat them carefully. */
   danger: z.boolean().optional(),
-});
+}).strict();
 
 export const CvarSchema = z.object({
   name: z.string(),
@@ -33,7 +39,7 @@ export const CvarSchema = z.object({
   values: z.array(z.string()).optional(),
   range: z.tuple([z.number(), z.number()]).optional(),
   mod: z.string().optional(),
-});
+}).strict();
 
 /**
  * Maps a server offers. `"live"` means query the running server (`maps *`);
@@ -64,8 +70,9 @@ export const QuerySchema = z.object({
       /** Optional: lines matching this regex are skipped (e.g. column headers). */
       skipIf: z.string().optional(),
     })
+    .strict()
     .optional(),
-});
+}).strict();
 
 export const ManifestSchema = z.object({
   /** Service name; defaults to the app directory name if omitted. */
@@ -77,7 +84,7 @@ export const ManifestSchema = z.object({
   queries: z.array(QuerySchema).default([]),
   maps: MapsSchema.optional(),
   notes: z.string().optional(),
-});
+}).strict();
 
 export type Command = z.infer<typeof CommandSchema>;
 export type Cvar = z.infer<typeof CvarSchema>;
