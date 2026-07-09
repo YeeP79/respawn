@@ -7,12 +7,23 @@
     "action": {
       "type": "string",
       "description": "The CDK action to perform (required in non-interactive mode)",
-      "enum": ["deploy", "destroy", "synth", "diff", "status"]
+      "enum": [
+        "deploy",
+        "destroy",
+        "synth",
+        "diff",
+        "status",
+        "push"
+      ]
     },
     "environment": {
       "type": "string",
       "description": "Target environment (required in non-interactive mode)",
-      "enum": ["dev", "staging", "prod"]
+      "enum": [
+        "dev",
+        "staging",
+        "prod"
+      ]
     },
     "service": {
       "type": "string",
@@ -41,7 +52,11 @@
     "requireApproval": {
       "type": "string",
       "description": "CDK approval level for security-sensitive changes",
-      "enum": ["never", "any-change", "broadening"],
+      "enum": [
+        "never",
+        "any-change",
+        "broadening"
+      ],
       "default": "never"
     },
     "profile": {
@@ -51,6 +66,16 @@
     "region": {
       "type": "string",
       "description": "AWS region override (defaults to config value)"
+    },
+    "forceBuild": {
+      "type": "boolean",
+      "description": "Rebuild and push even when the content-addressed tag is already in ECR",
+      "default": false
+    },
+    "requireImage": {
+      "type": "boolean",
+      "description": "Refuse to build; the image must already be in ECR (CI/CD)",
+      "default": false
     }
   },
   "additionalProperties": false

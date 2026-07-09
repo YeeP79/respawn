@@ -171,6 +171,18 @@ export interface DiscoveredService {
   config: GameServerConfig;
 }
 
+/**
+ * A CLI/executor action. `push` builds and pushes an image without deploying;
+ * `deploy` reuses that image when its content-addressed tag is already in ECR.
+ */
+export type Action =
+  | 'deploy'
+  | 'destroy'
+  | 'synth'
+  | 'diff'
+  | 'status'
+  | 'push';
+
 export interface ActionResult {
   success: boolean;
   serviceName: string;

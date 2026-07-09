@@ -197,6 +197,18 @@ The Zandronum Huffman tree in `players.py` is lifted verbatim from
 unencoded" when coding would expand the data, which is why the probe can send a request
 without implementing the encoder.
 
+### Image tags are content hashes, never git SHAs
+
+`sha-<12 hex>` over the Dockerfile + every `COPY`ed file + the `FROM` base's resolved digest
+(`utils/image-hash.ts`). `deploy` skips build+push when that tag is already in ECR.
+
+A git SHA is wrong in both directions: `git rev-parse HEAD` ignores the working tree, so an
+uncommitted Dockerfile/shim edit would reuse a stale image; and an unrelated commit changes the
+SHA, forcing a pointless multi-hundred-MB rebuild. The base digest is in the hash so an upstream
+republish of a mutable tag (`jives/hlds:cstrike`) forces a rebuild.
+
+Bump the `respawn-image-v1` salt in `computeImageTag` to force a fleet-wide rebuild.
+
 ### CPU and memory must be a valid Fargate pair
 
 `loader.ts` validates against the AWS matrix and fails fast. `CPU=256` allows 512–2048 MiB;

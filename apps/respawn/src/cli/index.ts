@@ -1,6 +1,6 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
-import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import type { Action, ActionResult, DiscoveredService, Environment } from '../config/types.js';
 import { discoverServices } from '../utils/stack-discovery.js';
 import { setVerbose } from '../utils/logger.js';
 import { deploy } from './actions/deploy.js';
@@ -8,15 +8,16 @@ import { destroy } from './actions/destroy.js';
 import { synth } from './actions/synth.js';
 import { diff } from './actions/diff.js';
 import { status } from './actions/status.js';
+import { push } from './actions/push.js';
 import { runSecrets } from './actions/secrets.js';
 
-type Action = 'deploy' | 'destroy' | 'synth' | 'diff' | 'status';
 
 /** Top-level menu: the CDK actions plus the interactive-only Secrets flow. */
 type MenuChoice = Action | 'secrets';
 
 const ACTION_LABELS: Record<Action, string> = {
   deploy: 'Deploy — Build, push, and deploy game servers',
+  push: 'Push — Build and push images to ECR (no deploy)',
   destroy: 'Destroy — Tear down game server infrastructure',
   synth: 'Synth — Preview CloudFormation templates',
   diff: 'Diff — Show pending infrastructure changes',
@@ -45,6 +46,7 @@ const ACTION_HANDLERS: Record<
   synth,
   diff,
   status,
+  push,
 };
 
 export async function runCli(options: {

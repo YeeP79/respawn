@@ -25,7 +25,8 @@ export {
   tagImage,
   hasBuildx,
   getImageSize,
+  resolveBaseImageDigest,
 } from './docker.js';
 export type { BuildImageResult } from './docker.js';
 
-export { ecrLogin, pushImage } from './ecr.js';
+export { ecrLogin, pushImage, imageTagExists } from './ecr.js';

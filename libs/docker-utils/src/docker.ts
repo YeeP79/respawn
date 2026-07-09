@@ -1,5 +1,21 @@
 import { spawn } from 'node:child_process';
 
+/** Runs a command capturing output without echoing it (JSON-safe). */
+function runQuiet(
+  command: string,
+  args: string[],
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
+    child.on('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    child.on('error', (err) => resolve({ exitCode: 1, stdout, stderr: err.message }));
+  });
+}
+
 export interface BuildImageResult {
   imageId: string;
   size: string;
@@ -105,4 +121,47 @@ async function getImageId(tag: string): Promise<string> {
   ]);
   if (result.exitCode !== 0) return 'unknown';
   return result.stdout.trim();
+}
+
+/**
+ * Resolves a base image reference to its immutable content digest.
+ *
+ * A tag like `jives/hlds:cstrike` is mutable — upstream can republish it. The
+ * digest is what actually determines the bytes we build on, so it belongs in the
+ * image content hash; without it a rebuilt Dockerfile would never notice a new
+ * base.
+ *
+ * @param reference - Image reference, e.g. `jives/hlds:cstrike`.
+ * @returns The manifest digest, e.g. `sha256:ab22…`.
+ * @throws When the reference cannot be resolved (unknown tag, network, or an
+ *   obsolete v1 manifest that the daemon refuses).
+ */
+export async function resolveBaseImageDigest(
+  reference: string,
+): Promise<string> {
+  const result = await runQuiet('docker', [
+    'manifest',
+    'inspect',
+    '-v',
+    reference,
+  ]);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `Could not resolve digest for base image "${reference}": ${result.stderr.trim()}`,
+    );
+  }
+
+  const parsed: unknown = JSON.parse(result.stdout);
+  // A multi-arch reference yields an array of per-platform descriptors; a single
+  // manifest yields one object. Either way the top-level Descriptor.digest is
+  // the reference's own digest.
+  const first = Array.isArray(parsed) ? parsed[0] : parsed;
+  const digest = (first as { Descriptor?: { digest?: string } })?.Descriptor
+    ?.digest;
+  if (!digest) {
+    throw new Error(
+      `Unexpected "docker manifest inspect" output for "${reference}".`,
+    );
+  }
+  return digest;
 }

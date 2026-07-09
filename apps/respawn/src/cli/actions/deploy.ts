@@ -1,6 +1,3 @@
-import { execSync } from 'node:child_process';
-import * as path from 'node:path';
-import { buildImage, tagImage, ecrLogin, pushImage } from '@respawn/docker-utils';
 import type { ActionResult, DiscoveredService, Environment } from '../../config/types.js';
 import {
   findUnsatisfiedRequirements,
@@ -9,6 +6,7 @@ import {
 import { runCdk } from '../../utils/cdk-runner.js';
 import { logger } from '../../utils/logger.js';
 import { secretExists } from '../../utils/secrets-runner.js';
+import { buildAndPush, resolveImage } from './push.js';
 
 export interface DeployContext {
   service: DiscoveredService;
@@ -20,14 +18,10 @@ export interface DeployContext {
   force?: boolean;
   /** Deploy-time prompt answers — container env var → value (overrides .env). */
   gameEnvOverrides?: Record<string, string>;
-}
-
-function getGitSha(): string {
-  try {
-    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'unknown';
-  }
+  /** Rebuild and push even when the content tag is already in ECR. */
+  forceBuild?: boolean;
+  /** Refuse to build: the image must already be in ECR (CI/CD). */
+  requireImage?: boolean;
 }
 
 /**
@@ -139,70 +133,22 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       };
     }
 
-    const gitSha = getGitSha();
-    const imageTag = `${environment}-${gitSha}`;
-    const latestTag = `${environment}-latest`;
-
-    // Determine registry
-    const region = config.aws.region;
-    const accountId = config.aws.accountId || process.env['CDK_DEFAULT_ACCOUNT'];
-    if (!accountId) {
+    // Content-addressed tag: skips the build entirely when this exact Dockerfile,
+    // shim and base image are already in ECR. `buildAndPush` deploys the shared
+    // stack first, because it owns the ECR repository being pushed to.
+    const resolved = await resolveImage(ctx);
+    if (resolved.alreadyPushed && ctx.requireImage) {
+      logger.info(`Reusing ${resolved.repository}:${resolved.tag} from ECR.`);
+    } else if (!resolved.alreadyPushed && ctx.requireImage) {
       throw new Error(
-        'AWS account ID not configured. Set AWS_ACCOUNT_ID in .env or ensure AWS CLI is configured.',
+        `--require-image was set but ${resolved.repository}:${resolved.tag} is not in ECR.\n` +
+          `Build and push it first:  pnpm respawn:push --service=${service.name}`,
       );
     }
-    const registry = `${accountId}.dkr.ecr.${region}.amazonaws.com`;
-    const repository = `respawn/${service.name}`;
+    await buildAndPush({ ...ctx, forceBuild: ctx.forceBuild }, resolved);
+    const imageTag = resolved.tag;
 
-    // The shared stack owns the ECR repository this service pushes to, so it has
-    // to exist before the push. On a first deploy the repo does not exist yet and
-    // `docker push` fails; on later deploys this is a fast no-op.
-    logger.info('Deploying shared infrastructure (VPC, ECR)...');
-    const sharedResult = await runCdk({
-      command: 'deploy',
-      stacks: [`RespawnShared-${environment}`],
-      context: { environment, services: service.name, workspaceRoot },
-      workspaceRoot,
-      requireApproval: ctx.requireApproval,
-      profile: ctx.profile,
-      verbose: ctx.verbose,
-      force: ctx.force,
-    });
-    if (sharedResult.exitCode !== 0) {
-      throw new Error('CDK deploy of shared stack failed');
-    }
-
-    // Build the game server image
-    logger.info(`Building image for ${service.name}...`);
-    const dockerfilePath = path.resolve(
-      service.path,
-      config.image.dockerfilePath,
-    );
-    await buildImage({
-      context: workspaceRoot,
-      dockerfile: dockerfilePath,
-      tag: `${repository}:${imageTag}`,
-    });
-
-    // Tag with latest
-    await tagImage(
-      `${repository}:${imageTag}`,
-      `${registry}/${repository}:${imageTag}`,
-    );
-    await tagImage(
-      `${repository}:${imageTag}`,
-      `${registry}/${repository}:${latestTag}`,
-    );
-
-    // ECR login and push
-    logger.info('Logging in to ECR...');
-    await ecrLogin(registry, region);
-
-    logger.info('Pushing image to ECR...');
-    await pushImage({ registry, repository, tag: imageTag, region });
-    await pushImage({ registry, repository, tag: latestTag, region });
-
-    // CDK deploy — the shared stack is already up (see above).
+    // CDK deploy — the shared stack is already up (see buildAndPush).
     logger.info('Deploying infrastructure via CDK...');
     const cdkResult = await runCdk({
       command: 'deploy',
@@ -231,7 +177,10 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       action: 'deploy',
       message: `Successfully deployed ${service.name} to ${environment}`,
       duration: Date.now() - start,
-      outputs: { imageTag, registry: `${registry}/${repository}` },
+      outputs: {
+        imageTag,
+        registry: `${resolved.registry}/${resolved.repository}`,
+      },
     };
   } catch (err) {
     return {

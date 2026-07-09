@@ -2,7 +2,7 @@
  * Executor entrypoint — run by tsx from the CJS executor wrapper.
  * This file runs in full ESM context with access to the entire codebase.
  */
-import type { Environment, ActionResult } from '../../config/types.js';
+import type { Action, Environment, ActionResult } from '../../config/types.js';
 import { discoverServices } from '../../utils/stack-discovery.js';
 import { setVerbose, logger } from '../../utils/logger.js';
 import { deploy } from '../../cli/actions/deploy.js';
@@ -10,9 +10,9 @@ import { destroy } from '../../cli/actions/destroy.js';
 import { synth } from '../../cli/actions/synth.js';
 import { diff } from '../../cli/actions/diff.js';
 import { status } from '../../cli/actions/status.js';
+import { push } from '../../cli/actions/push.js';
 import { runCli } from '../../cli/index.js';
 
-type Action = 'deploy' | 'destroy' | 'synth' | 'diff' | 'status';
 
 const ACTION_HANDLERS: Record<
   Action,
@@ -23,6 +23,8 @@ const ACTION_HANDLERS: Record<
     verbose?: boolean;
     profile?: string;
     force?: boolean;
+    forceBuild?: boolean;
+    requireImage?: boolean;
     requireApproval?: 'never' | 'any-change' | 'broadening';
   }) => Promise<ActionResult>
 > = {
@@ -31,6 +33,7 @@ const ACTION_HANDLERS: Record<
   synth,
   diff,
   status,
+  push,
 };
 
 interface RunOptions {
@@ -41,6 +44,10 @@ interface RunOptions {
   dryRun?: boolean;
   verbose?: boolean;
   force?: boolean;
+  /** Rebuild and push even when the content tag is already in ECR. */
+  forceBuild?: boolean;
+  /** Refuse to build; the image must already be in ECR (CI/CD). */
+  requireImage?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
   workspaceRoot: string;
@@ -89,6 +96,8 @@ async function run(options: RunOptions): Promise<void> {
         verbose: options.verbose,
         profile: options.profile,
         force: options.force,
+        forceBuild: options.forceBuild,
+        requireImage: options.requireImage,
         requireApproval: options.requireApproval ?? (options.nonInteractive ? 'never' : 'broadening'),
       });
 

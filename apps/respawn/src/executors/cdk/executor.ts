@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { ExecutorContext } from '@nx/devkit';
+import type { Action } from '../../config/types.js';
 
-type Action = 'deploy' | 'destroy' | 'synth' | 'diff' | 'status';
 type Environment = 'dev' | 'staging' | 'prod';
 
 export interface CdkExecutorSchema {
@@ -13,6 +13,8 @@ export interface CdkExecutorSchema {
   dryRun?: boolean;
   verbose?: boolean;
   force?: boolean;
+  forceBuild?: boolean;
+  requireImage?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
   region?: string;

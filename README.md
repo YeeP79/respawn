@@ -13,6 +13,7 @@ Servers scale to zero when nobody is playing, so an idle fleet costs almost noth
 - [Game Servers](#game-servers)
 - [Configuration Reference](#configuration-reference)
 - [Secrets](#secrets)
+- [Images](#images)
 - [Idle Shutdown](#idle-shutdown)
 - [Per-Server Setup](#per-server-setup)
 - [Usage Examples](#usage-examples)
@@ -321,6 +322,34 @@ Full specification: [`artifacts/AGENT_PROMPT.md`](artifacts/AGENT_PROMPT.md) §7
 
 ---
 
+## Images
+
+Services either pull an upstream image (`IMAGE_URI` set) or build one from their `Dockerfile`.
+Built images are tagged by **content**, never by git SHA:
+
+```
+sha-<12 hex>  =  hash( Dockerfile + every COPYed file + digest of the FROM base )
+```
+
+`pnpm respawn:push` builds and pushes without deploying. `deploy` computes the same tag and
+**skips the build entirely** when ECR already holds it — a no-op push takes ~3 seconds instead
+of rebuilding several hundred MB.
+
+Why not the git SHA? It is wrong in both directions. `git rev-parse HEAD` ignores the working
+tree, so an *uncommitted* edit to `respawn-init.sh` would reuse a stale image while looking
+correct. And an unrelated commit changes the SHA, forcing a pointless rebuild and push. Hashing
+the `FROM` digest also means an upstream republish of a mutable tag (`jives/hlds:cstrike`)
+correctly forces a rebuild.
+
+| Flag | Effect |
+|------|--------|
+| `--forceBuild` | Rebuild and push even when the tag is already in ECR |
+| `--requireImage` | Refuse to build; fail unless the image is already in ECR (CI/CD) |
+
+`dev-latest` is kept as a human-friendly moving pointer; CDK always pins the immutable content tag.
+
+---
+
 ## Idle Shutdown
 
 A sidecar polls the game, and after `IDLE_TIMEOUT_MINUTES` with nobody on it scales the ECS
@@ -522,6 +551,7 @@ stop being cheap.
 pnpm respawn:synth        # render CloudFormation
 pnpm respawn:diff         # diff against deployed state
 pnpm respawn:status       # running tasks, public IPs
+pnpm respawn:push         # build + push images to ECR, no deploy
 ```
 
 > `respawn:synth`, `:diff`, `:deploy`, `:destroy`, and `:status` pass a **hardcoded `--service`
