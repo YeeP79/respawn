@@ -1,0 +1,34 @@
+{
+  "displayName": "Counter-Strike 2",
+  "engine": "source2",
+  "notes": "Source 2, rcon over TCP via the sidecar. Source 2 uses `map` to change level (not changelevel) and split bot_add_ct/bot_add_t. Command forms from the CS2 console; not yet verified against a live server.",
+  "maps": "live",
+  "commands": [
+    { "name": "change_map", "description": "Load a map (e.g. de_inferno, de_mirage).", "rcon": "map {map}", "args": { "map": { "type": "string" } } },
+    { "name": "change_map_workshop", "description": "Load a workshop map by id.", "rcon": "host_workshop_map {id}", "args": { "id": { "description": "Steam Workshop file id", "type": "int" } } },
+    { "name": "add_bot_ct", "description": "Add a bot to the Counter-Terrorists.", "rcon": "bot_add_ct" },
+    { "name": "add_bot_t", "description": "Add a bot to the Terrorists.", "rcon": "bot_add_t" },
+    { "name": "kick_bots", "description": "Remove all bots.", "rcon": "bot_kick" },
+    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick {player}", "args": { "player": {} }, "danger": true },
+    { "name": "restart_warmup", "description": "Restart the match into warmup.", "rcon": "mp_warmup_start" },
+    { "name": "end_warmup", "description": "End warmup and start the match.", "rcon": "mp_warmup_end" },
+    { "name": "say", "description": "Broadcast a message to everyone.", "rcon": "say {message}", "args": { "message": {} } }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name, steamid, and the current map.",
+      "rcon": "status",
+      "singles": { "hostname": "^hostname\\s*:\\s*(.+)$", "map": "^(?:map|loaded spawngroup.+?maps/)\\s*:?\\s*(\\S+)", "playerCount": "^players\\s*:\\s*(.+)$" },
+      "row": { "match": "^#\\s*(\\d+)\\s+(?:\\d+\\s+)?\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|\\[U:\\S+)?", "fields": ["userid", "name", "steamid"], "skipIf": "^#\\s*userid" }
+    }
+  ],
+  "cvars": [
+    { "name": "mp_friendlyfire", "description": "Team damage.", "default": "0", "values": ["0", "1"] },
+    { "name": "mp_roundtime", "description": "Round length in minutes.", "default": "1.92", "range": [0, 60] },
+    { "name": "mp_maxrounds", "description": "Rounds per match.", "default": "24", "range": [0, 120] },
+    { "name": "mp_startmoney", "description": "Starting money.", "default": "800", "range": [0, 16000] },
+    { "name": "sv_cheats", "description": "Enable cheat commands.", "default": "0", "values": ["0", "1"] },
+    { "name": "bot_difficulty", "description": "Bot skill: 0 easy … 4 expert.", "default": "1", "values": ["0", "1", "2", "3", "4"] }
+  ]
+}
