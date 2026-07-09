@@ -41,10 +41,22 @@ describe('parseExecOutput', () => {
     expect(parseExecOutput(raw).exitCode).toBe(0);
   });
 
-  it('tolerates CRLF line endings from the PTY', () => {
-    // A PTY emits CRLF; build the whole session with it, not by double-converting.
+  it('strips CRLF line endings introduced by the PTY', () => {
     const raw = session('line1\nline2', 0).replace(/\n/g, '\r\n');
-    expect(parseExecOutput(raw).output).toBe('line1\r\nline2');
+    expect(parseExecOutput(raw).output).toBe('line1\nline2');
+  });
+
+  it('strips the doubled CR a PTY adds to a reply that already sent CRLF', () => {
+    // The remote writes \r\n and the pty turns the \n into \r\n again, so the wire
+    // really does carry \r\r\n. Matching /\r\n/ alone would leave a stray \r.
+    const raw = session('line1\r\nline2', 0).replace(/\n/g, '\r\n');
+    expect(parseExecOutput(raw).output).toBe('line1\nline2');
+  });
+
+  it('drops the caret-notation NUL the plugin echoes on channel open', () => {
+    // Literally "^@" (two chars) — the pty echoing a NUL byte, not a NUL itself.
+    const raw = session('^@"sv_gravity" is "800"', 0);
+    expect(parseExecOutput(raw).output).toBe('"sv_gravity" is "800"');
   });
 
   it('throws with the raw session when the markers are missing', () => {
