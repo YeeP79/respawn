@@ -4,6 +4,7 @@ import type { Environment } from '../config/types.js';
 import { loadConfig } from '../config/loader.js';
 import { SharedStack } from '../stacks/shared-stack.js';
 import { GameServerStack } from '../stacks/game-server-stack.js';
+import { discoverServices } from '../utils/stack-discovery.js';
 import * as path from 'node:path';
 
 const app = new cdk.App();
@@ -42,14 +43,23 @@ const discoveredServices = serviceNames.map((name) => {
   return { name, path: servicePath, config };
 });
 
-// Split services into ECR-based and IMAGE_URI-based
+// Split the REQUESTED services into ECR-based and IMAGE_URI-based (these get
+// per-service stacks).
 const ecrServices = discoveredServices.filter((s) => !s.config.image.imageUri);
 const imageUriServices = discoveredServices.filter((s) => !!s.config.image.imageUri);
 
-// Shared stack (VPC, ECR repos) — only create ECR repos for services that need them
+// The shared stack's ECR repos must cover EVERY local-build service, not just the
+// one being deployed. Otherwise deploying service B rewrites the shared stack to
+// contain only B's repo, and CloudFormation tries to delete A's ECR export —
+// which A's still-deployed stack depends on — and the update rolls back.
+const allEcrServices = discoverServices(workspaceRoot, environment).filter(
+  (s) => !s.config.image.imageUri,
+);
+
+// Shared stack (VPC, ECR repos) — a repo for every local-build service.
 const sharedStack = new SharedStack(app, `RespawnShared-${environment}`, {
   environment,
-  services: ecrServices,
+  services: allEcrServices,
   env: {
     account: process.env['CDK_DEFAULT_ACCOUNT'],
     region: discoveredServices[0]?.config.aws.region ?? 'us-east-1',
