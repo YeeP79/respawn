@@ -25,6 +25,7 @@ export const DEFAULT_NETWORKING: NetworkingConfig = {
   hostPort: 7777,
   protocol: 'UDP',
   additionalPorts: [],
+  internalPorts: [],
   enablePublicAccess: true,
 };
 

@@ -487,6 +487,7 @@ export function loadConfig(
       protocol:
         parseProtocol(env['PROTOCOL']) ?? DEFAULT_NETWORKING.protocol,
       additionalPorts: parseAdditionalPorts(env['ADDITIONAL_PORTS']),
+      internalPorts: parseAdditionalPorts(env['INTERNAL_PORTS']),
       enablePublicAccess:
         parseBoolean(env['ENABLE_PUBLIC_ACCESS']) ??
         DEFAULT_NETWORKING.enablePublicAccess,

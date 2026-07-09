@@ -92,6 +92,15 @@ export class GameServerFargateService extends Construct {
         protocol: ap.protocol === 'UDP' ? ecs.Protocol.UDP : ecs.Protocol.TCP,
       });
     }
+    // Internal ports are declared on the task but get NO security-group ingress
+    // (see GameServerNetworking): the sidecar reaches them over loopback.
+    for (const ap of config.networking.internalPorts) {
+      portMappings.push({
+        containerPort: ap.containerPort,
+        hostPort: ap.hostPort,
+        protocol: ap.protocol === 'UDP' ? ecs.Protocol.UDP : ecs.Protocol.TCP,
+      });
+    }
 
     // Determine container image source
     const image = props.imageUri

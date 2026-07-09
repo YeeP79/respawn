@@ -89,6 +89,13 @@ export interface NetworkingConfig {
   hostPort: number;
   protocol: 'TCP' | 'UDP';
   additionalPorts: AdditionalPort[];
+  /**
+   * Ports the task uses but that must NOT be publicly reachable — rcon (TCP),
+   * web panels, telnet. They get a port mapping (so the task documents them) but
+   * no security-group ingress. The rcon-control sidecar reaches them over
+   * loopback within the task, so they never need to face the internet.
+   */
+  internalPorts: AdditionalPort[];
   enablePublicAccess: boolean;
 }
 

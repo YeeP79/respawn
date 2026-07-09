@@ -433,6 +433,29 @@ describe('loadConfig', () => {
     expect(config.image.imageUri).toBeUndefined();
   });
 
+  describe('INTERNAL_PORTS', () => {
+    it('parses internal ports separately from additional ports', () => {
+      const dir = path.join(FIXTURES_DIR, 'internal-ports');
+      writeEnvFile(
+        dir,
+        'SERVICE_NAME=x\nADDITIONAL_PORTS=27005/udp\nINTERNAL_PORTS=27015/tcp',
+      );
+      const { networking } = loadConfig(dir, 'dev');
+      expect(networking.additionalPorts).toEqual([
+        { containerPort: 27005, hostPort: 27005, protocol: 'UDP' },
+      ]);
+      expect(networking.internalPorts).toEqual([
+        { containerPort: 27015, hostPort: 27015, protocol: 'TCP' },
+      ]);
+    });
+
+    it('defaults internalPorts to empty', () => {
+      const dir = path.join(FIXTURES_DIR, 'no-internal');
+      writeEnvFile(dir, 'SERVICE_NAME=x');
+      expect(loadConfig(dir, 'dev').networking.internalPorts).toEqual([]);
+    });
+  });
+
   describe('idle check method', () => {
     it.each([
       ['netstat', 'netstat'],
