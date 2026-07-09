@@ -19,28 +19,69 @@ Because discovery reads AWS rather than the repo, the server works installed
 anywhere and only lists servers that are actually up — a scaled-to-zero server has
 no task to control and correctly does not appear.
 
-## Requirements
+## Setup (for a new developer)
 
-- **AWS credentials** for the account the servers run in (`aws sso login`).
-- **session-manager-plugin** installed locally — `aws ecs execute-command` needs
-  it. Without it, calls fail with a clear message.
-- A server deployed with **`ENABLE_RCON_CONTROL=true`** (which flips
-  `enableExecuteCommand` and adds the sidecar).
+### 1. Install the AWS CLI and the Session Manager plugin
 
-## Build
+`aws ecs execute-command` tunnels through AWS Systems Manager, which needs a
+separate plugin. Without it every command fails with a clear message.
 
 ```bash
-npx nx build respawn-mcp        # -> apps/respawn-mcp/dist/index.js
+# macOS
+brew install awscli session-manager-plugin
+
+# Debian / Ubuntu
+curl -o /tmp/smp.deb "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
+sudo dpkg -i /tmp/smp.deb
+
+# Arch
+yay -S aws-session-manager-plugin
+
+# Verify
+session-manager-plugin --version
 ```
 
-## Configure an MCP client
+Other platforms: <https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html>
+
+### 2. Get AWS credentials for the game account
+
+```bash
+aws sso login --profile respawn      # or whatever profile name you use
+```
+
+The IAM identity needs, at minimum:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "ecs:ListClusters",
+    "ecs:ListTasks",
+    "ecs:DescribeTasks",
+    "ecs:ExecuteCommand"
+  ],
+  "Resource": "*"
+}
+```
+
+`ecs:ExecuteCommand` is the one that lets you run rcon; the other three are for
+server discovery. (An admin/power-user SSO role already covers these.)
+
+### 3. Build the MCP
+
+```bash
+pnpm install
+npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
+```
+
+### 4. Point your MCP client at it
 
 ```json
 {
   "mcpServers": {
     "respawn-rcon": {
       "command": "node",
-      "args": ["/absolute/path/to/apps/respawn-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/repo/apps/respawn-mcp/dist/index.js"],
       "env": {
         "RESPAWN_PROFILE": "respawn",
         "RESPAWN_REGION": "us-east-1"
@@ -52,6 +93,29 @@ npx nx build respawn-mcp        # -> apps/respawn-mcp/dist/index.js
 
 `RESPAWN_PROFILE` / `RESPAWN_REGION` fall back to `AWS_PROFILE` / `AWS_REGION`,
 then to `us-east-1`.
+
+### 5. The server must be deployed with the sidecar
+
+The MCP can only reach a server whose task carries the `rcon-control` sidecar,
+which means the service was deployed with **`ENABLE_RCON_CONTROL=true`** (this
+flips `enableExecuteCommand` and adds the container). A server without it — or one
+scaled to zero — will not appear in `list_servers`. Deploy or wake it first:
+
+```bash
+pnpm respawn:deploy   # or: aws ecs update-service … --desired-count 1
+```
+
+### Quick check
+
+```bash
+# Confirm you can reach a running, rcon-enabled server directly:
+aws ecs execute-command --cluster respawn-dev-cs16 \
+  --task "$(aws ecs list-tasks --cluster respawn-dev-cs16 --query 'taskArns[0]' --output text --profile respawn)" \
+  --container rcon-control --interactive --command "python3 /usr/local/bin/rcon.py --info" \
+  --profile respawn
+```
+
+If that prints the sidecar's `--info`, the MCP will work.
 
 ## Tools
 
@@ -105,13 +169,39 @@ mod's commands, a new query — needs only an MCP rebuild, never a game redeploy
 - **cvars** — documented tunables with ranges, so the LLM uses valid values.
 - **maps** — `"live"` queries the server (`maps *`); or an explicit array.
 
-## Security notes
+## Is the connection to the sidecar secure?
 
-- The rcon password never reaches this process or the MCP client — only the
-  command text and the reply cross the wire, over SSM's encrypted channel.
-- The command is base64-encoded before it enters the remote shell, so shell
-  metacharacters in it cannot break out or inject.
-- For GoldSrc games (cs16, tfc) rcon rides the game's UDP port, so the sidecar
-  removes the password from the public wire but the port stays reachable. For
-  Source games the sidecar lets you drop `27015/tcp` from `ADDITIONAL_PORTS`,
-  taking rcon off the internet entirely.
+Yes. The MCP reaches the sidecar over **AWS Systems Manager Session Manager** —
+the same channel `aws ecs execute-command` uses — not a port we open.
+
+- **Encrypted in transit.** Session Manager runs over a TLS 1.2 WebSocket. No
+  inbound port is exposed on the task; the connection is established outward from
+  the SSM agent in the container. There is no listening rcon socket to reach from
+  the internet.
+- **IAM-authenticated.** Only a caller with `ecs:ExecuteCommand` on the account
+  can open a session. The task role is granted the four `ssmmessages:*` actions
+  and nothing more.
+- **The rcon password never crosses this channel.** It lives in the sidecar as an
+  ECS secret; only the command text and the reply travel over the session. The
+  MCP process and the MCP client never see it.
+- **No shell injection.** The command is base64-encoded before it enters the
+  remote shell, so metacharacters in it cannot break out — it only ever becomes an
+  argument to `rcon.py`.
+
+**What is *not* configured, and how to harden it:**
+
+- **No customer KMS key.** The session is TLS-encrypted in transit but not wrapped
+  in an additional KMS envelope. To add one, set the cluster's
+  `executeCommandConfiguration.kmsKeyId`.
+- **No session logging/audit.** Sessions are not recorded to CloudWatch or S3. To
+  audit who ran what, set `executeCommandConfiguration.logConfiguration` on the
+  cluster (and the task role needs the matching `logs:`/`s3:` permissions).
+
+Both are one-line additions in `fargate-service.ts` if you want them; they were
+left off to keep the first cut simple.
+
+**The game port itself is a separate matter.** For GoldSrc games (cs16, tfc) rcon
+rides the game's UDP port, so the sidecar removes the password from the public
+wire but the port stays reachable and brute-forceable. For Source games the
+sidecar lets you drop `27015/tcp` from `ADDITIONAL_PORTS`, taking rcon off the
+internet entirely.

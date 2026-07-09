@@ -185,6 +185,7 @@ ENABLE_PERSISTENT_STORAGE=false   # wrong for any SteamCMD-installed game
 - **Deploy-time prompts:** pick a gamemode at deploy without editing config (`DEPLOY_PROMPTS`)
 - **Deploy preflight:** refuses to deploy when a required value is a placeholder or a referenced secret is absent
 - **Interactive or scripted:** Clack menu by default, `--non-interactive` for CI
+- **Mid-game control (optional):** an MCP server lets an LLM change maps, kick players, and set cvars over rcon — see [`apps/respawn-mcp`](apps/respawn-mcp/README.md)
 
 ---
 
