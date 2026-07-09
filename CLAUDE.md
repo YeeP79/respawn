@@ -197,6 +197,14 @@ The Zandronum Huffman tree in `players.py` is lifted verbatim from
 unencoded" when coding would expand the data, which is why the probe can send a request
 without implementing the encoder.
 
+### Admin ports go in `INTERNAL_PORTS`, never `ADDITIONAL_PORTS`
+
+The security group opens the primary port + every `ADDITIONAL_PORTS` entry to
+`0.0.0.0/0`. RCON, web panels and telnet must go in `INTERNAL_PORTS` instead: they
+get a task port mapping (so the game binds and the rcon-control sidecar reaches
+them over loopback) but no public ingress. Putting an admin port in
+`ADDITIONAL_PORTS` exposes it to the internet.
+
 ### Image tags are content hashes, never git SHAs
 
 `sha-<12 hex>` over the Dockerfile + every `COPY`ed file + the `FROM` base's resolved digest

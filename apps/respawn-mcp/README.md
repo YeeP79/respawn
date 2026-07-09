@@ -188,17 +188,17 @@ the same channel `aws ecs execute-command` uses — not a port we open.
   remote shell, so metacharacters in it cannot break out — it only ever becomes an
   argument to `rcon.py`.
 
-**What is *not* configured, and how to harden it:**
+**Additional hardening (configured when `ENABLE_RCON_CONTROL` is on):**
 
-- **No customer KMS key.** The session is TLS-encrypted in transit but not wrapped
-  in an additional KMS envelope. To add one, set the cluster's
-  `executeCommandConfiguration.kmsKeyId`.
-- **No session logging/audit.** Sessions are not recorded to CloudWatch or S3. To
-  audit who ran what, set `executeCommandConfiguration.logConfiguration` on the
-  cluster (and the task role needs the matching `logs:`/`s3:` permissions).
+- **Customer-managed KMS key.** The exec data channel is encrypted with a
+  per-service KMS key (rotation enabled), on top of the SSM default TLS.
+- **Session audit logging.** Every exec session is logged to CloudWatch at
+  `/respawn/<env>/<service>/exec-audit` (retained a year) — a record of who ran
+  what, when. The task role is granted only encrypt/decrypt on the key and write
+  on that log group.
 
-Both are one-line additions in `fargate-service.ts` if you want them; they were
-left off to keep the first cut simple.
+These are provisioned only for services that enable the sidecar, so a server
+without rcon-control creates neither.
 
 **The game port itself is a separate matter.** For GoldSrc games (cs16, tfc) rcon
 rides the game's UDP port, so the sidecar removes the password from the public

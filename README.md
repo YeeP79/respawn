@@ -14,6 +14,7 @@ Servers scale to zero when nobody is playing, so an idle fleet costs almost noth
 - [Configuration Reference](#configuration-reference)
 - [Secrets](#secrets)
 - [Images](#images)
+- [Security](#security)
 - [Idle Shutdown](#idle-shutdown)
 - [Per-Server Setup](#per-server-setup)
 - [Usage Examples](#usage-examples)
@@ -241,6 +242,7 @@ Unknown keys are ignored; malformed ones fail fast at load.
 | `CONTAINER_PORT` / `HOST_PORT` | `7777` | Primary game port |
 | `PROTOCOL` | `UDP` | `UDP` or `TCP` |
 | `ADDITIONAL_PORTS` | — | `port/proto` or `host:container/proto`, comma-separated |
+| `INTERNAL_PORTS` | — | Ports the task uses but that get **no public ingress** (rcon, web, telnet) — reachable only in-task over loopback |
 | `ENABLE_PUBLIC_ACCESS` | `true` | Public subnet + security group ingress |
 
 ### Cost & lifecycle
@@ -348,6 +350,32 @@ correctly forces a rebuild.
 | `--requireImage` | Refuse to build; fail unless the image is already in ECR (CI/CD) |
 
 `dev-latest` is kept as a human-friendly moving pointer; CDK always pins the immutable content tag.
+
+---
+
+## Security
+
+**Only game ports are public.** The security group opens the primary port and
+`ADDITIONAL_PORTS` (client, query, SourceTV — traffic players need) to the
+internet. Admin surfaces — RCON, web panels, telnet — go in `INTERNAL_PORTS`:
+they are declared on the task and reachable in-task over loopback, but the
+security group opens no ingress for them. Nothing outside the task can reach them.
+
+**rcon runs inside the task.** The rcon-control sidecar (`ENABLE_RCON_CONTROL`)
+talks to the game over loopback, so the rcon password never crosses the public
+network. Remote control is via ECS Exec (SSM): TLS + IAM, a customer KMS key, and
+an audit log — no inbound port. See [`apps/respawn-mcp`](apps/respawn-mcp/README.md).
+
+**The game port itself is public by design** (players connect from anywhere) and
+relies on:
+- **AWS Shield Standard** — automatic, free L3/L4 DDoS protection on the ENI.
+- **`sv_password` / GSLT** — set a join password via the MCP (`set_server_password`)
+  or a secret, and a Steam token for listing where the engine supports it.
+- **Game-level query-flood protection** — most engines rate-limit A2S/status
+  queries; the idle probe treats a rate-limited reply as "unknown", never "empty".
+
+To lock a *specific* server to known IPs (a private/friends server), restrict its
+security group to your CIDRs — the game port is the only thing left open.
 
 ---
 
