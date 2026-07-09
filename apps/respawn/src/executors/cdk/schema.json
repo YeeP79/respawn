@@ -13,7 +13,8 @@
         "synth",
         "diff",
         "status",
-        "push"
+        "push",
+        "updates"
       ]
     },
     "environment": {
@@ -75,6 +76,11 @@
     "requireImage": {
       "type": "boolean",
       "description": "Refuse to build; the image must already be in ECR (CI/CD)",
+      "default": false
+    },
+    "record": {
+      "type": "boolean",
+      "description": "updates only: record observed values as the new baseline",
       "default": false
     }
   },

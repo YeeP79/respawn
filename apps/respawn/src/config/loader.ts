@@ -7,6 +7,7 @@ import type {
   Environment,
   GameServerConfig,
   SecretRef,
+  UpdateCheck,
 } from './types.js';
 import {
   DEFAULT_CONTAINER,
@@ -240,6 +241,31 @@ function parseCommand(value: string | undefined): string[] | undefined {
   return value.split(/\s+/).filter((s) => s.length > 0);
 }
 
+/**
+ * Parses `UPDATE_CHECK=image,build,steam:730` into typed checks.
+ *
+ * @throws On an unknown kind, or a `steam:` entry without a numeric app id.
+ */
+function parseUpdateChecks(value: string | undefined): UpdateCheck[] {
+  if (value === undefined || value === '') return [];
+  return value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && s !== 'none')
+    .map((entry) => {
+      if (entry === 'image') return { kind: 'image' as const };
+      if (entry === 'build') return { kind: 'build' as const };
+
+      const steam = /^steam:(\d+)$/.exec(entry);
+      if (steam) return { kind: 'steam' as const, appId: steam[1]! };
+
+      throw new Error(
+        `Invalid UPDATE_CHECK entry "${entry}". Expected "image", "build", ` +
+          `"steam:<appId>", or "none".`,
+      );
+    });
+}
+
 function parseRequiredEnvVars(value: string | undefined): string[] {
   if (value === undefined || value === '') return [];
   return value
@@ -366,6 +392,25 @@ function validate(config: GameServerConfig): void {
     throw new Error(
       'idleShutdown.statusEndpoint is required when checkMethod is "http".',
     );
+  }
+
+  // An `image` check reads the digest that IMAGE_URI resolves to; a `build` check
+  // hashes a Dockerfile that is only built when IMAGE_URI is unset. Each is
+  // meaningless for the other kind of service, so catch the mix-up at load.
+  const hasImageUri = Boolean(config.image.imageUri);
+  for (const check of config.updateChecks) {
+    if (check.kind === 'image' && !hasImageUri) {
+      throw new Error(
+        'UPDATE_CHECK=image requires IMAGE_URI, but this service builds its own ' +
+          'image. Use UPDATE_CHECK=build instead.',
+      );
+    }
+    if (check.kind === 'build' && hasImageUri) {
+      throw new Error(
+        'UPDATE_CHECK=build requires a locally built image, but IMAGE_URI is set. ' +
+          'Use UPDATE_CHECK=image instead.',
+      );
+    }
   }
 
   const { queryPort, queryTimeoutSeconds } = config.idleShutdown;
@@ -519,6 +564,7 @@ export function loadConfig(
     deployPrompts: parseDeployPrompts(env['DEPLOY_PROMPTS']),
     gameEnvVars: parseGameEnvVars(env),
     requiredEnvVars: parseRequiredEnvVars(env['REQUIRED_ENV_VARS']),
+    updateChecks: parseUpdateChecks(env['UPDATE_CHECK']),
 
     aws: {
       accountId: env['AWS_ACCOUNT_ID'] || undefined,

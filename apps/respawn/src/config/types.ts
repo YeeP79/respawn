@@ -23,6 +23,8 @@ export interface GameServerConfig {
    * appears in the CLI and can be inspected). See `preflightDeploy`.
    */
   requiredEnvVars: string[];
+  /** What to compare against the last recorded state. Declared via `UPDATE_CHECK`. */
+  updateChecks: UpdateCheck[];
   aws: AwsConfig;
   tags: Record<string, string>;
 }
@@ -172,6 +174,22 @@ export interface DiscoveredService {
 }
 
 /**
+ * One `UPDATE_CHECK` entry: a thing that can change underneath a deployed server.
+ *
+ * The three are independent. An upstream image can move without the game
+ * changing; Valve can ship a game update without the image moving (SteamCMD
+ * installs at container start, onto EFS); and our own Dockerfile/shim can change
+ * without either.
+ */
+export type UpdateCheck =
+  /** The `IMAGE_URI` tag now resolves to a different registry digest. */
+  | { kind: 'image' }
+  /** Our locally-built image content hash changed (Dockerfile, COPYed files, or base). */
+  | { kind: 'build' }
+  /** Valve published a new public build for this Steam app id. */
+  | { kind: 'steam'; appId: string };
+
+/**
  * A CLI/executor action. `push` builds and pushes an image without deploying;
  * `deploy` reuses that image when its content-addressed tag is already in ECR.
  */
@@ -181,7 +199,8 @@ export type Action =
   | 'synth'
   | 'diff'
   | 'status'
-  | 'push';
+  | 'push'
+  | 'updates';
 
 export interface ActionResult {
   success: boolean;

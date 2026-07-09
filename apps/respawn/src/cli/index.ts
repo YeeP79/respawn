@@ -9,6 +9,7 @@ import { synth } from './actions/synth.js';
 import { diff } from './actions/diff.js';
 import { status } from './actions/status.js';
 import { push } from './actions/push.js';
+import { updates } from './actions/updates.js';
 import { runSecrets } from './actions/secrets.js';
 
 
@@ -18,6 +19,7 @@ type MenuChoice = Action | 'secrets';
 const ACTION_LABELS: Record<Action, string> = {
   deploy: 'Deploy — Build, push, and deploy game servers',
   push: 'Push — Build and push images to ECR (no deploy)',
+  updates: 'Updates — Check for upstream image / game updates',
   destroy: 'Destroy — Tear down game server infrastructure',
   synth: 'Synth — Preview CloudFormation templates',
   diff: 'Diff — Show pending infrastructure changes',
@@ -47,6 +49,7 @@ const ACTION_HANDLERS: Record<
   diff,
   status,
   push,
+  updates,
 };
 
 export async function runCli(options: {

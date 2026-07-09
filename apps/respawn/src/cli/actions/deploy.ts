@@ -7,6 +7,7 @@ import { runCdk } from '../../utils/cdk-runner.js';
 import { logger } from '../../utils/logger.js';
 import { secretExists } from '../../utils/secrets-runner.js';
 import { buildAndPush, resolveImage } from './push.js';
+import { checkUpdates, recordUpdateState } from './updates.js';
 
 export interface DeployContext {
   service: DiscoveredService;
@@ -82,6 +83,25 @@ async function preflight(ctx: DeployContext): Promise<void> {
   logger.debug(`Preflight passed for ${config.serviceName}`);
 }
 
+/**
+ * Records what this deploy actually shipped, so `updates` has a baseline to
+ * compare against. Best-effort: a failure here must not fail a deploy that
+ * already succeeded, so it warns instead of throwing.
+ */
+async function recordDeployedState(ctx: DeployContext): Promise<void> {
+  if (ctx.service.config.updateChecks.length === 0) return;
+  try {
+    const results = await checkUpdates(ctx);
+    await recordUpdateState(ctx, results);
+    logger.debug(`Recorded update baseline for ${ctx.service.name}`);
+  } catch (err) {
+    logger.warn(
+      `Deployed, but could not record the update baseline for ${ctx.service.name}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export async function deploy(ctx: DeployContext): Promise<ActionResult> {
   const start = Date.now();
   const { service, environment, workspaceRoot } = ctx;
@@ -122,6 +142,8 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       if (cdkResult.exitCode !== 0) {
         throw new Error('CDK deploy failed');
       }
+
+      await recordDeployedState(ctx);
 
       return {
         success: true,
@@ -170,6 +192,8 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
     if (cdkResult.exitCode !== 0) {
       throw new Error('CDK deploy failed');
     }
+
+    await recordDeployedState(ctx);
 
     return {
       success: true,

@@ -504,6 +504,47 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('UPDATE_CHECK', () => {
+    it('parses image, build and steam entries', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-mix');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nIMAGE_URI=a/b:c\nUPDATE_CHECK=image,steam:730');
+      expect(loadConfig(dir, 'dev').updateChecks).toEqual([
+        { kind: 'image' },
+        { kind: 'steam', appId: '730' },
+      ]);
+    });
+
+    it('defaults to no checks, and treats "none" as no checks', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-none');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nUPDATE_CHECK=none');
+      expect(loadConfig(dir, 'dev').updateChecks).toEqual([]);
+    });
+
+    it('rejects an unknown kind', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-bogus');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nUPDATE_CHECK=carrier-pigeon');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid UPDATE_CHECK entry/);
+    });
+
+    it('rejects a steam entry without a numeric app id', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-steam-bad');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nUPDATE_CHECK=steam:cs2');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid UPDATE_CHECK entry/);
+    });
+
+    it('rejects image on a locally built service', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-image-nobuild');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nUPDATE_CHECK=image');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/requires IMAGE_URI/);
+    });
+
+    it('rejects build on an upstream-image service', () => {
+      const dir = path.join(FIXTURES_DIR, 'uc-build-upstream');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nIMAGE_URI=a/b:c\nUPDATE_CHECK=build');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/requires a locally built image/);
+    });
+  });
+
   describe('plaintext secret rejection', () => {
     function load(name: string, content: string) {
       const dir = path.join(FIXTURES_DIR, name);

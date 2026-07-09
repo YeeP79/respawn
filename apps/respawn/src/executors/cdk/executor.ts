@@ -15,6 +15,7 @@ export interface CdkExecutorSchema {
   force?: boolean;
   forceBuild?: boolean;
   requireImage?: boolean;
+  record?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
   region?: string;

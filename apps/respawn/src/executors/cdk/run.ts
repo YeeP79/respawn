@@ -11,6 +11,7 @@ import { synth } from '../../cli/actions/synth.js';
 import { diff } from '../../cli/actions/diff.js';
 import { status } from '../../cli/actions/status.js';
 import { push } from '../../cli/actions/push.js';
+import { updates } from '../../cli/actions/updates.js';
 import { runCli } from '../../cli/index.js';
 
 
@@ -25,6 +26,7 @@ const ACTION_HANDLERS: Record<
     force?: boolean;
     forceBuild?: boolean;
     requireImage?: boolean;
+    record?: boolean;
     requireApproval?: 'never' | 'any-change' | 'broadening';
   }) => Promise<ActionResult>
 > = {
@@ -34,6 +36,7 @@ const ACTION_HANDLERS: Record<
   diff,
   status,
   push,
+  updates,
 };
 
 interface RunOptions {
@@ -48,6 +51,8 @@ interface RunOptions {
   forceBuild?: boolean;
   /** Refuse to build; the image must already be in ECR (CI/CD). */
   requireImage?: boolean;
+  /** `updates` only: record the observed values as the new baseline. */
+  record?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
   workspaceRoot: string;
@@ -98,6 +103,7 @@ async function run(options: RunOptions): Promise<void> {
         force: options.force,
         forceBuild: options.forceBuild,
         requireImage: options.requireImage,
+        record: options.record,
         requireApproval: options.requireApproval ?? (options.nonInteractive ? 'never' : 'broadening'),
       });
 
