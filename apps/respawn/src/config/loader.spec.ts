@@ -545,6 +545,55 @@ describe('loadConfig', () => {
     });
   });
 
+  describe('rcon-control', () => {
+    it('parses protocol and port', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-on');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=source',
+        'RCON_PORT=27016',
+      ].join('\n'));
+      const { rconControl } = loadConfig(dir, 'dev');
+      expect(rconControl).toMatchObject({
+        enabled: true,
+        protocol: 'source',
+        passwordSecretVar: 'RCON_PASSWORD',
+        port: 27016,
+      });
+    });
+
+    it('defaults to disabled', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-off');
+      writeEnvFile(dir, 'SERVICE_NAME=x');
+      expect(loadConfig(dir, 'dev').rconControl.enabled).toBe(false);
+    });
+
+    it('defaults protocol to goldsrc', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-default-proto');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nSECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon\nENABLE_RCON_CONTROL=true');
+      expect(loadConfig(dir, 'dev').rconControl.protocol).toBe('goldsrc');
+    });
+
+    it('rejects enablement without the rcon secret', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-nosecret');
+      writeEnvFile(dir, 'SERVICE_NAME=x\nENABLE_RCON_CONTROL=true');
+      expect(() => loadConfig(dir, 'dev')).toThrow(/needs the rcon password in SECRET_REFS/);
+    });
+
+    it('honours RCON_PASSWORD_VAR for a differently-named secret', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-altvar');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=CS2_RCONPW=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PASSWORD_VAR=CS2_RCONPW',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+  });
+
   describe('plaintext secret rejection', () => {
     function load(name: string, content: string) {
       const dir = path.join(FIXTURES_DIR, name);

@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
@@ -11,6 +12,7 @@ import { GameServerLogging } from './logging.js';
 import { GameServerNetworking } from './networking.js';
 import { GameServerEfsStorage } from './efs-storage.js';
 import { IdleShutdownSidecar } from './idle-shutdown.js';
+import { RconControlSidecar } from './rcon-control.js';
 import { RedisSidecar } from './redis-sidecar.js';
 
 export interface GameServerFargateServiceProps {
@@ -164,6 +166,41 @@ export class GameServerFargateService extends Construct {
       });
     }
 
+    // rcon-control sidecar (optional): reached only via ECS Exec, talks to the
+    // game over loopback so the rcon password never leaves the task.
+    const enableExec = config.rconControl.enabled;
+    if (enableExec) {
+      const rconSecret = containerSecrets[config.rconControl.passwordSecretVar];
+      if (!rconSecret) {
+        // Guarded by loader validation, but fail loudly if that ever changes.
+        throw new Error(
+          `rcon-control needs a SECRET_REFS entry named ${config.rconControl.passwordSecretVar}.`,
+        );
+      }
+      new RconControlSidecar(this, 'RconControl', {
+        taskDefinition,
+        logGroup: logging.logGroup,
+        rconSecret,
+        protocol: config.rconControl.protocol,
+        rconPort:
+          config.rconControl.port ?? config.networking.containerPort,
+        serviceName: config.serviceName,
+      });
+
+      // ECS Exec tunnels through SSM Messages; the task role needs these.
+      taskDefinition.taskRole.addToPrincipalPolicy(
+        new iam.PolicyStatement({
+          actions: [
+            'ssmmessages:CreateControlChannel',
+            'ssmmessages:CreateDataChannel',
+            'ssmmessages:OpenControlChannel',
+            'ssmmessages:OpenDataChannel',
+          ],
+          resources: ['*'],
+        }),
+      );
+    }
+
     // Fargate service
     const capacityProviderStrategies: ecs.CapacityProviderStrategy[] =
       config.cost.useFargateSpot
@@ -185,6 +222,8 @@ export class GameServerFargateService extends Construct {
       // NAT; the default selection looks for private subnets, which don't exist.
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       capacityProviderStrategies,
+      // Enables `aws ecs execute-command` into the rcon-control sidecar.
+      enableExecuteCommand: enableExec,
     });
 
     // Ensure the ECS service is deleted before the cluster's capacity provider

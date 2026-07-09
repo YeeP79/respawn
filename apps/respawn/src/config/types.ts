@@ -12,6 +12,7 @@ export interface GameServerConfig {
   healthCheck: HealthCheckConfig;
   idleShutdown: IdleShutdownConfig;
   redis: RedisConfig;
+  rconControl: RconControlConfig;
   persistentStorage: PersistentStorageConfig;
   secretRefs: SecretRef[];
   deployPrompts: DeployPrompt[];
@@ -159,6 +160,22 @@ export interface IdleShutdownConfig {
 
 export interface RedisConfig {
   enabled: boolean;
+}
+
+/**
+ * The rcon-control sidecar: an ECS-Exec-only container that runs rcon commands
+ * against the game over loopback, so the password never leaves the task.
+ * Enabled by `ENABLE_RCON_CONTROL`; needs a `SECRET_REFS` entry naming the rcon
+ * password so it can be injected without appearing in the task definition.
+ */
+export interface RconControlConfig {
+  enabled: boolean;
+  /** Wire protocol: 'goldsrc' (UDP, GoldSrc) or 'source' (TCP, Source/Source 2). */
+  protocol: 'goldsrc' | 'source';
+  /** Container env var (from SECRET_REFS) holding the rcon password. */
+  passwordSecretVar: string;
+  /** Port the game answers rcon on. Defaults to the container port. */
+  port?: number;
 }
 
 export interface AwsConfig {

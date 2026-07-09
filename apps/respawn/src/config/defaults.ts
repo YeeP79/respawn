@@ -9,6 +9,7 @@ import type {
   HealthCheckConfig,
   IdleShutdownConfig,
   RedisConfig,
+  RconControlConfig,
   PersistentStorageConfig,
   AwsConfig,
   Environment,
@@ -71,6 +72,12 @@ export const DEFAULT_IDLE_SHUTDOWN: IdleShutdownConfig = {
 
 export const DEFAULT_REDIS: RedisConfig = {
   enabled: false,
+};
+
+export const DEFAULT_RCON_CONTROL: RconControlConfig = {
+  enabled: false,
+  protocol: 'goldsrc',
+  passwordSecretVar: 'RCON_PASSWORD',
 };
 
 export const DEFAULT_AWS: AwsConfig = {

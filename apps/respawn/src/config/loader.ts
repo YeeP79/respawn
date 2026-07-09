@@ -20,6 +20,7 @@ import {
   DEFAULT_HEALTH_CHECK,
   DEFAULT_IDLE_SHUTDOWN,
   DEFAULT_REDIS,
+  DEFAULT_RCON_CONTROL,
   DEFAULT_PERSISTENT_STORAGE,
   DEFAULT_AWS,
   ENVIRONMENT_OVERRIDES,
@@ -413,6 +414,24 @@ function validate(config: GameServerConfig): void {
     }
   }
 
+  if (config.rconControl.enabled) {
+    const named = config.secretRefs.some(
+      (r) => r.containerEnvVar === config.rconControl.passwordSecretVar,
+    );
+    if (!named) {
+      throw new Error(
+        `ENABLE_RCON_CONTROL needs the rcon password in SECRET_REFS as ` +
+          `"${config.rconControl.passwordSecretVar}", so it is injected as an ECS ` +
+          `secret rather than plaintext. Add it, or set RCON_PASSWORD_VAR to the ` +
+          `SECRET_REFS entry that holds it.`,
+      );
+    }
+    const rp = config.rconControl.port;
+    if (rp !== undefined && (rp < 1 || rp > 65535)) {
+      throw new Error(`Invalid RCON_PORT: ${rp}. Must be 1-65535.`);
+    }
+  }
+
   const { queryPort, queryTimeoutSeconds } = config.idleShutdown;
   if (queryPort !== undefined && (queryPort < 1 || queryPort > 65535)) {
     throw new Error(`Invalid IDLE_QUERY_PORT: ${queryPort}. Must be 1-65535.`);
@@ -550,6 +569,21 @@ export function loadConfig(
       enabled:
         parseBoolean(env['ENABLE_REDIS_SIDECAR']) ??
         DEFAULT_REDIS.enabled,
+    },
+
+    rconControl: {
+      enabled:
+        parseBoolean(env['ENABLE_RCON_CONTROL']) ??
+        DEFAULT_RCON_CONTROL.enabled,
+      protocol:
+        (env['RCON_PROTOCOL']?.toLowerCase() === 'source'
+          ? 'source'
+          : env['RCON_PROTOCOL']?.toLowerCase() === 'goldsrc'
+            ? 'goldsrc'
+            : undefined) ?? DEFAULT_RCON_CONTROL.protocol,
+      passwordSecretVar:
+        env['RCON_PASSWORD_VAR'] || DEFAULT_RCON_CONTROL.passwordSecretVar,
+      port: parseNumber(env['RCON_PORT']),
     },
 
     persistentStorage: {
