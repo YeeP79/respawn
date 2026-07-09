@@ -133,11 +133,18 @@ export interface IdleShutdownConfig {
    * - `a2s`: Valve GoldSrc/Source, and Steam-hosted games (Rust, 7 Days to Die)
    * - `q3`: idTech3 `getstatus` (Quake 3, Quake Live)
    * - `gamespy`: Unreal Engine 1 `\info\` (Unreal Tournament 99)
+   * - `zandronum`: Zandronum launcher protocol (Doom 2 / Heretic / Hexen)
    *
    * - `http`: poll `statusEndpoint` for a player/connection count.
    * - `netstat`: count established sockets. Correct only for TCP games.
    */
-  checkMethod: 'netstat' | 'http' | 'a2s' | 'q3' | 'gamespy';
+  checkMethod:
+    | 'netstat'
+    | 'http'
+    | 'a2s'
+    | 'q3'
+    | 'gamespy'
+    | 'zandronum';
   statusEndpoint?: string;
   /**
    * Port the query methods probe. Defaults to the game's container port; several

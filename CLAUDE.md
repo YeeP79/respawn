@@ -181,6 +181,7 @@ nothing game-specific:
 | `a2s` | GoldSrc/Source + Steam-hosted (cs16, css, cs2, gmod, tfc, tf2, l4d2, rust, 7dtd) |
 | `q3` | idTech3 `getstatus` (quake3, quakelive) |
 | `gamespy` | Unreal Engine 1 `\info\` (ut99) |
+| `zandronum` | Zandronum launcher protocol, Huffman-coded (doom2) |
 | `http` | poll `IDLE_STATUS_ENDPOINT` (valheim) |
 
 Set `IDLE_QUERY_PORT` when the game answers somewhere other than its game port
@@ -188,8 +189,13 @@ Set `IDLE_QUERY_PORT` when the game answers somewhere other than its game port
 
 **A failed probe returns -1 = unknown, never 0.** The watchdog holds the idle timer rather
 than scale a populated server to zero on one dropped packet, so a wrong protocol or port
-costs money — it never kills a live match. `doom2` (Zandronum) has no probe: its launcher
-protocol is Huffman-compressed, so idle shutdown is disabled rather than left unsafe.
+costs money — it never kills a live match. Rate limiting counts as unknown too: Zandronum's
+`sv_queryignoretime` reply must never read as "empty".
+
+The Zandronum Huffman tree in `players.py` is lifted verbatim from
+`zandronum/src/huffman/huffman.cpp`. Its codec emits a `0xff` prefix meaning "the rest is
+unencoded" when coding would expand the data, which is why the probe can send a request
+without implementing the encoder.
 
 ### CPU and memory must be a valid Fargate pair
 

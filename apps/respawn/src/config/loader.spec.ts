@@ -442,6 +442,7 @@ describe('loadConfig', () => {
       ['q3', 'q3'],
       ['gamespy', 'gamespy'],
       ['GameSpy', 'gamespy'],
+      ['zandronum', 'zandronum'],
     ])('accepts %s', (given, expected) => {
       const dir = path.join(FIXTURES_DIR, `idle-${given}`);
       const extra = given.toLowerCase() === 'http'

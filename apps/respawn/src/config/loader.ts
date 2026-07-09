@@ -55,7 +55,7 @@ function parseProtocol(value: string | undefined): 'TCP' | 'UDP' | undefined {
 
 function parseCheckMethod(
   value: string | undefined,
-): 'netstat' | 'http' | 'a2s' | 'q3' | 'gamespy' | undefined {
+): 'netstat' | 'http' | 'a2s' | 'q3' | 'gamespy' | 'zandronum' | undefined {
   if (value === undefined || value === '') return undefined;
   const lower = value.toLowerCase();
   if (
@@ -63,7 +63,8 @@ function parseCheckMethod(
     lower === 'http' ||
     lower === 'a2s' ||
     lower === 'q3' ||
-    lower === 'gamespy'
+    lower === 'gamespy' ||
+    lower === 'zandronum'
   ) {
     return lower;
   }

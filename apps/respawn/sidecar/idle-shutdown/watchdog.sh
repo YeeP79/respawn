@@ -29,7 +29,7 @@ fi
 
 get_connection_count() {
   case "$CHECK_METHOD" in
-    a2s | q3 | gamespy)
+    a2s | q3 | gamespy | zandronum)
       # Ask the game how many humans are on. Prints -1 when the query fails,
       # which the caller treats as "unknown" rather than "empty".
       python3 /usr/local/bin/players.py \

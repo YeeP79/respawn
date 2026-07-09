@@ -13,6 +13,7 @@ Servers scale to zero when nobody is playing, so an idle fleet costs almost noth
 - [Game Servers](#game-servers)
 - [Configuration Reference](#configuration-reference)
 - [Secrets](#secrets)
+- [Idle Shutdown](#idle-shutdown)
 - [Per-Server Setup](#per-server-setup)
 - [Usage Examples](#usage-examples)
 - [Best Practices](#best-practices)
@@ -67,8 +68,9 @@ npx cdk bootstrap --profile respawn
 
 - You need multi-region, multi-instance, or matchmaking-aware fleets
 - The game requires a persistent public IP across restarts (Fargate tasks get a new IP on every start)
-- The server cannot tolerate a cold start — the idle sidecar stops the task, and waking it takes
-  30–90s (much longer if a SteamCMD install must re-run)
+- The server cannot tolerate a cold start. The idle sidecar stops the task and **nothing brings it
+  back automatically** — you restart it with `pnpm respawn:deploy` or by setting `desiredCount` to 1.
+  A cold start is 30–90s, much longer if a SteamCMD install must re-run
 
 ### Most Common Pattern (80% Case)
 
@@ -97,7 +99,9 @@ HOST_PORT=30000
 PROTOCOL=UDP
 
 ENABLE_IDLE_SHUTDOWN=true
-IDLE_CHECK_METHOD=netstat
+# Ask the game for its player count. `netstat` is for TCP games ONLY — it cannot
+# see players on a UDP game and would scale a full server to zero. See Idle shutdown.
+IDLE_CHECK_METHOD=a2s
 IDLE_TIMEOUT_MINUTES=30
 
 GAME_ENV_SERVERNAME="Respawn Minetest"
@@ -317,6 +321,52 @@ Full specification: [`artifacts/AGENT_PROMPT.md`](artifacts/AGENT_PROMPT.md) §7
 
 ---
 
+## Idle Shutdown
+
+A sidecar polls the game, and after `IDLE_TIMEOUT_MINUTES` with nobody on it scales the ECS
+service to zero. **Nothing scales it back up** — restart with `pnpm respawn:deploy`, or:
+
+```bash
+aws ecs update-service --cluster respawn-dev-cs16 --service respawn-dev-cs16 \
+  --desired-count 1 --profile respawn
+```
+
+### Choosing `IDLE_CHECK_METHOD`
+
+UDP game servers hand every client a single *unconnected* socket, so counting established
+sockets reports zero however many people are playing. `netstat` is therefore correct **only
+for TCP games** — on a UDP game it will scale a full server to zero mid-match.
+
+Ask the game instead. Each service declares its own probe; the sidecar knows nothing
+game-specific.
+
+| Method | Protocol | Used by |
+|--------|----------|---------|
+| `a2s` | Valve A2S_INFO | cs16, css, cs2, gmod, tfc, tf2, l4d2, rust, 7dtd |
+| `q3` | idTech3 `getstatus` | quake3, quakelive |
+| `gamespy` | Unreal Engine 1 `\info\` | ut99 |
+| `zandronum` | Zandronum launcher protocol (Huffman-coded) | doom2 |
+| `http` | GET `IDLE_STATUS_ENDPOINT`, read `.connections` / `.players` | valheim |
+| `netstat` | established sockets | TCP games only |
+
+Set `IDLE_QUERY_PORT` when the game answers somewhere other than its game port — Rust uses
+28017, UT99 uses game port + 1.
+
+### Failure is safe by construction
+
+A probe that times out, hits the wrong port, or speaks the wrong protocol returns **-1
+("unknown"), never 0**. The watchdog holds the idle timer on unknown rather than treating it
+as empty. A misconfigured probe therefore costs money — the server never sleeps — but can
+never end a live match. `Could not determine player count` in the sidecar log is that signal.
+
+Two probes are **unverified against a live server** and marked so in their `.env`: `7dtd` and
+`quakelive`. Every other probe — including `zandronum` — was tested against a real server.
+
+Zandronum rate-limits queries (`sv_queryignoretime`). The probe reports that as *unknown*,
+never as *empty*, so flood protection cannot be mistaken for an idle server.
+
+---
+
 ## Per-Server Setup
 
 ### Counter-Strike 2
@@ -380,6 +430,10 @@ CONTAINER_COMMAND=-iwad /data/doom2.wad -file /data/brutalv21.pk3 -port 10666 ..
 ```
 
 Zandronum also supports **Heretic**, **Hexen**, and **Strife** — just swap the WAD file.
+
+Idle shutdown uses `IDLE_CHECK_METHOD=zandronum`, which speaks Zandronum's Huffman-coded
+launcher protocol. Its query flood protection (`sv_queryignoretime`) is reported as *unknown*
+rather than *empty*, so a rate-limited reply never scales a populated server to zero.
 
 ### Quake 3 Arena
 
