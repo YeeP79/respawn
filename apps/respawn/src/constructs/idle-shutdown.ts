@@ -31,6 +31,10 @@ export class IdleShutdownSidecar extends Construct {
         IDLE_CHECK_INTERVAL_SECONDS: String(props.config.checkIntervalSeconds),
         IDLE_CHECK_METHOD: props.config.checkMethod,
         IDLE_STATUS_ENDPOINT: props.config.statusEndpoint ?? '',
+        // Query probes default to the game port; games that answer elsewhere
+        // (Rust: 28017, UT99: game port + 1) set IDLE_QUERY_PORT in their .env.
+        IDLE_QUERY_PORT: String(props.config.queryPort ?? props.containerPort),
+        IDLE_QUERY_TIMEOUT_SECONDS: String(props.config.queryTimeoutSeconds),
         CONTAINER_PORT: String(props.containerPort),
         ADDITIONAL_PORTS:
           props.additionalPorts && props.additionalPorts.length > 0

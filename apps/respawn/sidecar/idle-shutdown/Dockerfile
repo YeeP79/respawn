@@ -9,7 +9,7 @@ RUN apk add --no-cache \
     python3
 
 COPY watchdog.sh /usr/local/bin/watchdog.sh
-COPY a2s_players.py /usr/local/bin/a2s_players.py
-RUN chmod +x /usr/local/bin/watchdog.sh /usr/local/bin/a2s_players.py
+COPY players.py /usr/local/bin/players.py
+RUN chmod +x /usr/local/bin/watchdog.sh /usr/local/bin/players.py
 
 ENTRYPOINT ["/usr/local/bin/watchdog.sh"]

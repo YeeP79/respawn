@@ -439,6 +439,9 @@ describe('loadConfig', () => {
       ['http', 'http'],
       ['a2s', 'a2s'],
       ['A2S', 'a2s'],
+      ['q3', 'q3'],
+      ['gamespy', 'gamespy'],
+      ['GameSpy', 'gamespy'],
     ])('accepts %s', (given, expected) => {
       const dir = path.join(FIXTURES_DIR, `idle-${given}`);
       const extra = given.toLowerCase() === 'http'
@@ -464,6 +467,39 @@ describe('loadConfig', () => {
       const dir = path.join(FIXTURES_DIR, 'idle-a2s-bare');
       writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_CHECK_METHOD=a2s');
       expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+
+    it('defaults queryPort to undefined and timeout to 4s', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-defaults');
+      writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_CHECK_METHOD=a2s');
+      const { idleShutdown } = loadConfig(dir, 'dev');
+      expect(idleShutdown.queryPort).toBeUndefined();
+      expect(idleShutdown.queryTimeoutSeconds).toBe(4);
+    });
+
+    it('parses an explicit query port (Rust queries on 28017)', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-qport');
+      writeEnvFile(
+        dir,
+        'SERVICE_NAME=rust\nIDLE_CHECK_METHOD=a2s\nIDLE_QUERY_PORT=28017\nIDLE_QUERY_TIMEOUT_SECONDS=6',
+      );
+      const { idleShutdown } = loadConfig(dir, 'dev');
+      expect(idleShutdown.queryPort).toBe(28017);
+      expect(idleShutdown.queryTimeoutSeconds).toBe(6);
+    });
+
+    it.each([['0'], ['70000']])('rejects an out-of-range query port %s', (p) => {
+      const dir = path.join(FIXTURES_DIR, `idle-qport-${p}`);
+      writeEnvFile(dir, `SERVICE_NAME=idle\nIDLE_QUERY_PORT=${p}`);
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid IDLE_QUERY_PORT/);
+    });
+
+    it('rejects a non-positive query timeout', () => {
+      const dir = path.join(FIXTURES_DIR, 'idle-qtimeout');
+      writeEnvFile(dir, 'SERVICE_NAME=idle\nIDLE_QUERY_TIMEOUT_SECONDS=0');
+      expect(() => loadConfig(dir, 'dev')).toThrow(
+        /Invalid IDLE_QUERY_TIMEOUT_SECONDS/,
+      );
     });
   });
 

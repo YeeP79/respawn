@@ -8,6 +8,9 @@ CHECK_METHOD=${IDLE_CHECK_METHOD:-netstat}
 STATUS_ENDPOINT=${IDLE_STATUS_ENDPOINT:-}
 PORT=${CONTAINER_PORT:-7777}
 EXTRA_PORTS=${ADDITIONAL_PORTS:-}
+# Each game supplies these; the sidecar knows nothing game-specific itself.
+QUERY_PORT=${IDLE_QUERY_PORT:-$PORT}
+QUERY_TIMEOUT=${IDLE_QUERY_TIMEOUT_SECONDS:-4}
 
 idle_seconds=0
 running=true
@@ -19,17 +22,26 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 echo "[watchdog] Starting idle-shutdown watchdog"
-echo "[watchdog] Timeout: ${IDLE_TIMEOUT_SECONDS}s, Interval: ${CHECK_INTERVAL}s, Method: ${CHECK_METHOD}, Port: ${PORT}"
+echo "[watchdog] Timeout: ${IDLE_TIMEOUT_SECONDS}s, Interval: ${CHECK_INTERVAL}s, Method: ${CHECK_METHOD}, Port: ${PORT}, QueryPort: ${QUERY_PORT}"
 if [ -n "$EXTRA_PORTS" ]; then
   echo "[watchdog] Additional ports: ${EXTRA_PORTS}"
 fi
 
 get_connection_count() {
-  if [ "$CHECK_METHOD" = "a2s" ]; then
-    # Ask the game how many humans are on. Prints -1 when the query fails, which
-    # the caller treats as "unknown" rather than "empty".
-    python3 /usr/local/bin/a2s_players.py 127.0.0.1 "$PORT" 2>/dev/null || echo "-1"
-  elif [ "$CHECK_METHOD" = "http" ]; then
+  case "$CHECK_METHOD" in
+    a2s | q3 | gamespy)
+      # Ask the game how many humans are on. Prints -1 when the query fails,
+      # which the caller treats as "unknown" rather than "empty".
+      python3 /usr/local/bin/players.py \
+        --protocol "$CHECK_METHOD" \
+        --host 127.0.0.1 \
+        --port "$QUERY_PORT" \
+        --timeout "$QUERY_TIMEOUT" 2>/dev/null || echo "-1"
+      return
+      ;;
+  esac
+
+  if [ "$CHECK_METHOD" = "http" ]; then
     if [ -z "$STATUS_ENDPOINT" ]; then
       echo "[watchdog] ERROR: IDLE_STATUS_ENDPOINT is required for http check method" >&2
       echo "0"

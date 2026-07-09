@@ -127,13 +127,25 @@ export interface IdleShutdownConfig {
   checkIntervalSeconds: number;
   /**
    * How the idle sidecar decides whether anyone is playing.
-   * - `a2s`: query the game (GoldSrc/Source). The only reliable option for them.
-   * - `netstat`: count established sockets. Blind to UDP games that use one
-   *   unconnected socket for all clients.
+   *
+   * The three query methods ask the game itself and are the only reliable option
+   * for UDP games, which serve every client from one unconnected socket:
+   * - `a2s`: Valve GoldSrc/Source, and Steam-hosted games (Rust, 7 Days to Die)
+   * - `q3`: idTech3 `getstatus` (Quake 3, Quake Live)
+   * - `gamespy`: Unreal Engine 1 `\info\` (Unreal Tournament 99)
+   *
    * - `http`: poll `statusEndpoint` for a player/connection count.
+   * - `netstat`: count established sockets. Correct only for TCP games.
    */
-  checkMethod: 'netstat' | 'http' | 'a2s';
+  checkMethod: 'netstat' | 'http' | 'a2s' | 'q3' | 'gamespy';
   statusEndpoint?: string;
+  /**
+   * Port the query methods probe. Defaults to the game's container port; several
+   * games listen for queries elsewhere (Rust: 28017, UT99: game port + 1).
+   */
+  queryPort?: number;
+  /** Seconds to wait for a query reply before reporting "unknown". */
+  queryTimeoutSeconds: number;
 }
 
 export interface RedisConfig {

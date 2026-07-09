@@ -66,6 +66,7 @@ export const DEFAULT_IDLE_SHUTDOWN: IdleShutdownConfig = {
   timeoutMinutes: 30,
   checkIntervalSeconds: 60,
   checkMethod: 'netstat',
+  queryTimeoutSeconds: 4,
 };
 
 export const DEFAULT_REDIS: RedisConfig = {

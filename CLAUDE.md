@@ -169,13 +169,27 @@ use the interactive `pnpm respawn` menu, which discovers them properly.
 
 ### `netstat` idle detection is blind to UDP games
 
-GoldSrc/Source servers hand every client a single unconnected UDP socket (verified:
-`/proc/net/udp` has exactly one entry with 16 slots free), so `ss -tun state established`
-reports zero however many people are playing. Use `IDLE_CHECK_METHOD=a2s`, which asks the
-game for its own player count. `netstat` remains correct only for TCP games.
+UDP game servers hand every client a single unconnected socket (verified against hlds:
+`/proc/net/udp` has exactly one entry, empty server or full), so `ss -tun state established`
+reports zero however many people are playing. `netstat` is correct **only for TCP games**.
 
-The sidecar treats a failed A2S query as **unknown**, not empty — it holds the idle timer
-rather than scale a populated server to zero on one dropped packet.
+Ask the game instead. Each service configures its own probe in `.env`; the sidecar knows
+nothing game-specific:
+
+| `IDLE_CHECK_METHOD` | Games |
+|---------------------|-------|
+| `a2s` | GoldSrc/Source + Steam-hosted (cs16, css, cs2, gmod, tfc, tf2, l4d2, rust, 7dtd) |
+| `q3` | idTech3 `getstatus` (quake3, quakelive) |
+| `gamespy` | Unreal Engine 1 `\info\` (ut99) |
+| `http` | poll `IDLE_STATUS_ENDPOINT` (valheim) |
+
+Set `IDLE_QUERY_PORT` when the game answers somewhere other than its game port
+(rust: 28017, ut99: game port + 1).
+
+**A failed probe returns -1 = unknown, never 0.** The watchdog holds the idle timer rather
+than scale a populated server to zero on one dropped packet, so a wrong protocol or port
+costs money — it never kills a live match. `doom2` (Zandronum) has no probe: its launcher
+protocol is Huffman-compressed, so idle shutdown is disabled rather than left unsafe.
 
 ### CPU and memory must be a valid Fargate pair
 

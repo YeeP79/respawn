@@ -55,10 +55,18 @@ function parseProtocol(value: string | undefined): 'TCP' | 'UDP' | undefined {
 
 function parseCheckMethod(
   value: string | undefined,
-): 'netstat' | 'http' | 'a2s' | undefined {
+): 'netstat' | 'http' | 'a2s' | 'q3' | 'gamespy' | undefined {
   if (value === undefined || value === '') return undefined;
   const lower = value.toLowerCase();
-  if (lower === 'netstat' || lower === 'http' || lower === 'a2s') return lower;
+  if (
+    lower === 'netstat' ||
+    lower === 'http' ||
+    lower === 'a2s' ||
+    lower === 'q3' ||
+    lower === 'gamespy'
+  ) {
+    return lower;
+  }
   return undefined;
 }
 
@@ -359,6 +367,16 @@ function validate(config: GameServerConfig): void {
     );
   }
 
+  const { queryPort, queryTimeoutSeconds } = config.idleShutdown;
+  if (queryPort !== undefined && (queryPort < 1 || queryPort > 65535)) {
+    throw new Error(`Invalid IDLE_QUERY_PORT: ${queryPort}. Must be 1-65535.`);
+  }
+  if (queryTimeoutSeconds <= 0) {
+    throw new Error(
+      `Invalid IDLE_QUERY_TIMEOUT_SECONDS: ${queryTimeoutSeconds}. Must be > 0.`,
+    );
+  }
+
   if (config.scaling.enableAutoScaling) {
     if (config.scaling.minCapacity > config.scaling.maxCapacity) {
       throw new Error(
@@ -476,6 +494,10 @@ export function loadConfig(
         parseCheckMethod(env['IDLE_CHECK_METHOD']) ??
         DEFAULT_IDLE_SHUTDOWN.checkMethod,
       statusEndpoint: env['IDLE_STATUS_ENDPOINT'] || undefined,
+      queryPort: parseNumber(env['IDLE_QUERY_PORT']),
+      queryTimeoutSeconds:
+        parseNumber(env['IDLE_QUERY_TIMEOUT_SECONDS']) ??
+        DEFAULT_IDLE_SHUTDOWN.queryTimeoutSeconds,
     },
 
     redis: {
