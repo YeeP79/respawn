@@ -1,0 +1,5 @@
+{
+  "name": "css",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}
