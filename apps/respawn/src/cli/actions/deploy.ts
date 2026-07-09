@@ -154,6 +154,24 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
     const registry = `${accountId}.dkr.ecr.${region}.amazonaws.com`;
     const repository = `respawn/${service.name}`;
 
+    // The shared stack owns the ECR repository this service pushes to, so it has
+    // to exist before the push. On a first deploy the repo does not exist yet and
+    // `docker push` fails; on later deploys this is a fast no-op.
+    logger.info('Deploying shared infrastructure (VPC, ECR)...');
+    const sharedResult = await runCdk({
+      command: 'deploy',
+      stacks: [`RespawnShared-${environment}`],
+      context: { environment, services: service.name, workspaceRoot },
+      workspaceRoot,
+      requireApproval: ctx.requireApproval,
+      profile: ctx.profile,
+      verbose: ctx.verbose,
+      force: ctx.force,
+    });
+    if (sharedResult.exitCode !== 0) {
+      throw new Error('CDK deploy of shared stack failed');
+    }
+
     // Build the game server image
     logger.info(`Building image for ${service.name}...`);
     const dockerfilePath = path.resolve(
@@ -184,11 +202,11 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
     await pushImage({ registry, repository, tag: imageTag, region });
     await pushImage({ registry, repository, tag: latestTag, region });
 
-    // CDK deploy
+    // CDK deploy — the shared stack is already up (see above).
     logger.info('Deploying infrastructure via CDK...');
     const cdkResult = await runCdk({
       command: 'deploy',
-      stacks: [`RespawnShared-${environment}`, `Respawn-${environment}-${service.name}`],
+      stacks: [`Respawn-${environment}-${service.name}`],
       context: {
         environment,
         services: service.name,
