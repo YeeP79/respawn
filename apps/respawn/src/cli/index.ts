@@ -1,8 +1,8 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
-import type { Action, ActionResult, DiscoveredService, Environment } from '../config/types.js';
-import { discoverServices } from '../utils/stack-discovery.js';
-import { setVerbose } from '../utils/logger.js';
+import type { Action, ActionResult, DiscoveredService, Environment } from '@respawn/core';
+import { discoverServices } from '@respawn/core';
+import { setVerbose } from '@respawn/core';
 import { deploy } from './actions/deploy.js';
 import { destroy } from './actions/destroy.js';
 import { synth } from './actions/synth.js';

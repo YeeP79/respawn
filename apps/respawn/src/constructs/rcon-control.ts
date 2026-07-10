@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import type { RconProtocol } from '../config/types.js';
+import type { RconProtocol } from '@respawn/core';
 
 export interface RconControlSidecarProps {
   taskDefinition: ecs.FargateTaskDefinition;

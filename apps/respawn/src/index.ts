@@ -4,4 +4,4 @@ export type {
   Environment,
   DiscoveredService,
   ActionResult,
-} from './config/types.js';
+} from '@respawn/core';

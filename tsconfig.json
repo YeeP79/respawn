@@ -14,6 +14,9 @@
     },
     {
       "path": "./apps/respawn-mcp"
+    },
+    {
+      "path": "./libs/core"
     }
   ]
 }

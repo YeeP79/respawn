@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
-import type { ActionResult, DiscoveredService, Environment } from '../../config/types.js';
-import { logger } from '../../utils/logger.js';
+import type { ActionResult, DiscoveredService, Environment } from '@respawn/core';
+import { logger } from '@respawn/core';
 
 export interface StatusContext {
   service: DiscoveredService;

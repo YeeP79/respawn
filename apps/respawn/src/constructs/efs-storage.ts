@@ -2,7 +2,7 @@ import { RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as efs from 'aws-cdk-lib/aws-efs';
 import { Construct } from 'constructs';
-import type { Environment } from '../config/types.js';
+import type { Environment } from '@respawn/core';
 
 export interface GameServerEfsStorageProps {
   vpc: ec2.IVpc;

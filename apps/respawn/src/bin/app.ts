@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import type { Environment } from '../config/types.js';
+import type { Environment } from '@respawn/core';
 import { SharedStack } from '../stacks/shared-stack.js';
 import { GameServerStack } from '../stacks/game-server-stack.js';
-import { discoverServices } from '../utils/stack-discovery.js';
+import { discoverServices } from '@respawn/core';
 
 const app = new cdk.App();
 

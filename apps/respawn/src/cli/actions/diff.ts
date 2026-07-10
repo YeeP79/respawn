@@ -1,6 +1,6 @@
-import type { ActionResult, DiscoveredService, Environment } from '../../config/types.js';
-import { runCdk } from '../../utils/cdk-runner.js';
-import { logger } from '../../utils/logger.js';
+import type { ActionResult, DiscoveredService, Environment } from '@respawn/core';
+import { runCdk } from '@respawn/core';
+import { logger } from '@respawn/core';
 
 export interface DiffContext {
   service: DiscoveredService;

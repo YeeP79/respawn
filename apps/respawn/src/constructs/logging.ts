@@ -1,7 +1,7 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import type { Environment } from '../config/types.js';
+import type { Environment } from '@respawn/core';
 
 const RETENTION_MAP: Record<number, logs.RetentionDays> = {
   1: logs.RetentionDays.ONE_DAY,

@@ -1,8 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import type { Construct } from 'constructs';
-import type { Environment, DiscoveredService } from '../config/types.js';
-import { sharedStackName } from '../config/defaults.js';
+import type { Environment, DiscoveredService } from '@respawn/core';
+import { sharedStackName } from '@respawn/core';
 import { GameServerEcrRepo } from '../constructs/ecr-repo.js';
 
 export interface SharedStackProps extends cdk.StackProps {

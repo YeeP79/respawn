@@ -1,6 +1,6 @@
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
-import type { AdditionalPort } from '../config/types.js';
+import type { AdditionalPort } from '@respawn/core';
 
 export interface GameServerNetworkingProps {
   vpc: ec2.IVpc;

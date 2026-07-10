@@ -3,9 +3,9 @@ import type {
   ActionResult,
   DiscoveredService,
   Environment,
-} from '../../config/types.js';
-import { logger } from '../../utils/logger.js';
-import { readState, writeState } from '../../utils/ssm-state.js';
+} from '@respawn/core';
+import { logger } from '@respawn/core';
+import { readState, writeState } from '@respawn/core';
 import {
   checkKey,
   checkLabel,
@@ -13,7 +13,7 @@ import {
   fetchSteamBuildId,
   hasActionableUpdate,
   type CheckResult,
-} from '../../utils/update-check.js';
+} from '@respawn/core';
 import { resolveImage } from './push.js';
 
 export interface UpdatesContext {

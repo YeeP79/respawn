@@ -9,6 +9,9 @@
   "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
   "references": [
     {
+      "path": "../../libs/core/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/docker-utils/tsconfig.lib.json"
     },
     {

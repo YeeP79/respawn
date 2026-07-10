@@ -1,0 +1,15 @@
+{
+  "name": "@respawn/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@respawn/docker-utils": "workspace:*",
+    "@respawn/shared-types": "workspace:*",
+    "chalk": "^5.4.1",
+    "dotenv": "^16.4.7"
+  }
+}

@@ -2,9 +2,9 @@
  * Executor entrypoint — run by tsx from the CJS executor wrapper.
  * This file runs in full ESM context with access to the entire codebase.
  */
-import type { Action, Environment, ActionResult } from '../../config/types.js';
-import { discoverServices } from '../../utils/stack-discovery.js';
-import { setVerbose, logger } from '../../utils/logger.js';
+import type { Action, Environment, ActionResult } from '@respawn/core';
+import { discoverServices } from '@respawn/core';
+import { setVerbose, logger } from '@respawn/core';
 import { deploy } from '../../cli/actions/deploy.js';
 import { destroy } from '../../cli/actions/destroy.js';
 import { synth } from '../../cli/actions/synth.js';
@@ -18,7 +18,7 @@ import { runCli } from '../../cli/index.js';
 const ACTION_HANDLERS: Record<
   Action,
   (ctx: {
-    service: { name: string; path: string; config: import('../../config/types.js').GameServerConfig };
+    service: { name: string; path: string; config: import('@respawn/core').GameServerConfig };
     environment: Environment;
     workspaceRoot: string;
     verbose?: boolean;

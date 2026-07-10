@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
-import type { DiscoveredService } from '../../config/types.js';
-import { setSecret } from '../../utils/secrets-runner.js';
+import type { DiscoveredService } from '@respawn/core';
+import { setSecret } from '@respawn/core';
 
 export interface SecretsContext {
   services: DiscoveredService[];

@@ -11,14 +11,14 @@ import type {
   ActionResult,
   DiscoveredService,
   Environment,
-} from '../../config/types.js';
+} from '@respawn/core';
 import {
   collectImageInputs,
   computeImageTag,
   parseBaseImage,
-} from '../../utils/image-hash.js';
-import { runCdk } from '../../utils/cdk-runner.js';
-import { logger } from '../../utils/logger.js';
+} from '@respawn/core';
+import { runCdk } from '@respawn/core';
+import { logger } from '@respawn/core';
 import * as fs from 'node:fs';
 
 export interface PushContext {

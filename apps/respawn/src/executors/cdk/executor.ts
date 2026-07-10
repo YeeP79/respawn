@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
 import type { ExecutorContext } from '@nx/devkit';
-import type { Action } from '../../config/types.js';
+import type { Action } from '@respawn/core';
 
 type Environment = 'dev' | 'staging' | 'prod';
 

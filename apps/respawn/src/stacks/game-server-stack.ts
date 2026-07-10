@@ -2,8 +2,8 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import type { Construct } from 'constructs';
-import type { GameServerConfig } from '../config/types.js';
-import { serviceStackName, defaultTags } from '../config/defaults.js';
+import type { GameServerConfig } from '@respawn/core';
+import { serviceStackName, defaultTags } from '@respawn/core';
 import { GameServerFargateService } from '../constructs/fargate-service.js';
 
 export interface GameServerStackProps extends cdk.StackProps {
