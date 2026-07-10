@@ -3,6 +3,8 @@ import {
   explainExit,
   formatLimit,
   isUnlimited,
+  resolveWindow,
+  sparkline,
   summarizeDatapoints,
   percentToMiB,
   parseContainerStats,
@@ -56,11 +58,16 @@ describe('summarizeDatapoints', () => {
       { Average: 10, Maximum: 30 },
       { Average: 20, Maximum: 25 },
     ]);
-    expect(s).toEqual({ average: 15, maximum: 30, samples: 2 });
+    expect(s).toEqual({ average: 15, maximum: 30, samples: 2, series: [] });
   });
 
   it('tolerates datapoints missing one statistic', () => {
-    expect(summarizeDatapoints([{ Average: 5 }])).toEqual({ average: 5, maximum: 0, samples: 1 });
+    expect(summarizeDatapoints([{ Average: 5 }])).toEqual({
+      average: 5,
+      maximum: 0,
+      samples: 1,
+      series: [],
+    });
   });
 });
 
@@ -109,5 +116,80 @@ describe('formatLimit / isUnlimited', () => {
   it('formats a real limit', () => {
     expect(isUnlimited(192 * 1024 * 1024)).toBe(false);
     expect(formatLimit(192 * 1024 * 1024)).toBe('192.0 MiB');
+  });
+});
+
+describe('summarizeDatapoints series', () => {
+  it('keeps the timeline, sorted oldest first', () => {
+    // avg/peak alone cannot tell a startup spike from sustained saturation.
+    const s = summarizeDatapoints([
+      { Timestamp: '2026-07-09T18:02:00Z', Average: 20, Maximum: 30 },
+      { Timestamp: '2026-07-09T18:01:00Z', Average: 90, Maximum: 100 },
+    ]);
+    expect(s?.series.map((p) => p.at)).toEqual([
+      '2026-07-09T18:01:00Z',
+      '2026-07-09T18:02:00Z',
+    ]);
+    expect(s?.maximum).toBe(100);
+  });
+
+  it('yields an empty series when datapoints carry no timestamps', () => {
+    expect(summarizeDatapoints([{ Average: 5, Maximum: 5 }])?.series).toEqual([]);
+  });
+});
+
+describe('sparkline', () => {
+  it('scales values across the block ramp', () => {
+    expect(sparkline([0, 100])).toBe('▁█');
+    expect(sparkline([])).toBe('');
+  });
+
+  it('clamps values above the max rather than indexing off the end', () => {
+    expect(sparkline([150], 100)).toBe('█');
+  });
+});
+
+describe('resolveWindow', () => {
+  const now = Date.parse('2026-07-09T20:00:00Z');
+
+  it('defaults to a 30 minute relative lookback', () => {
+    expect(resolveWindow({ now })).toEqual({ start: now - 30 * 60_000 });
+  });
+
+  it('honours an explicit relative lookback', () => {
+    expect(resolveWindow({ minutes: 10, now })).toEqual({ start: now - 10 * 60_000 });
+  });
+
+  it('accepts an absolute window and lets since override minutes', () => {
+    const w = resolveWindow({
+      minutes: 5,
+      since: '2026-07-09T19:46:00Z',
+      until: '2026-07-09T19:47:00Z',
+      now,
+    });
+    expect(w).toEqual({
+      start: Date.parse('2026-07-09T19:46:00Z'),
+      end: Date.parse('2026-07-09T19:47:00Z'),
+    });
+  });
+
+  it('leaves the window open-ended when until is omitted', () => {
+    expect(resolveWindow({ since: '2026-07-09T19:46:00Z', now })).toEqual({
+      start: Date.parse('2026-07-09T19:46:00Z'),
+    });
+  });
+
+  it('rejects an unparseable timestamp instead of querying the epoch', () => {
+    expect(() => resolveWindow({ since: 'last tuesday', now })).toThrow(/parseable/);
+  });
+
+  it('rejects an inverted window', () => {
+    expect(() =>
+      resolveWindow({ since: '2026-07-09T19:47:00Z', until: '2026-07-09T19:46:00Z', now }),
+    ).toThrow(/must be after/);
+  });
+
+  it('rejects until without since', () => {
+    expect(() => resolveWindow({ until: '2026-07-09T19:47:00Z', now })).toThrow(/requires since/);
   });
 });

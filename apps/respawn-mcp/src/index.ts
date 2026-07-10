@@ -15,6 +15,7 @@ import {
   fetchMetrics,
   isUnlimited,
   formatLimit,
+  sparkline,
   parseContainerStats,
   percentToMiB,
   toMiB,
@@ -334,24 +335,45 @@ server.registerTool(
     inputSchema: {
       service: z.string(),
       minutes: z.number().int().min(5).max(1440).optional().describe('Lookback window, default 60'),
+      resolution: z
+        .enum(['1m', '5m'])
+        .optional()
+        .describe('Datapoint period. 1m reveals short spikes a 5m average hides. Default 5m'),
+      series: z
+        .boolean()
+        .optional()
+        .describe('Include the per-datapoint timeline, not just avg/peak. Default true'),
     },
   },
-  async ({ service, minutes }) => {
-    const m = await fetchMetrics(service, minutes ?? 60, awsOpts);
-    const lines = [`${m.service} — last ${m.minutes}m (task: ${m.taskCpuUnits ?? '?'} cpu / ${m.taskMemoryMiB ?? '?'} MiB)`];
+  async ({ service, minutes, resolution, series }) => {
+    const period = resolution === '1m' ? 60 : 300;
+    const m = await fetchMetrics(service, minutes ?? 60, awsOpts, period);
+    const showSeries = series ?? true;
+    const lines = [
+      `${m.service} — last ${m.minutes}m @ ${m.periodSeconds}s (task: ${m.taskCpuUnits ?? '?'} cpu / ${m.taskMemoryMiB ?? '?'} MiB)`,
+    ];
     if (!m.cpu && !m.memory) {
       lines.push('  no datapoints — the service was scaled to zero for the whole window');
     }
     if (m.cpu) {
-      lines.push(`  cpu:    avg ${m.cpu.average.toFixed(1)}%  peak ${m.cpu.maximum.toFixed(1)}%`);
+      lines.push(`  cpu:    avg ${m.cpu.average.toFixed(1)}%  peak ${m.cpu.maximum.toFixed(1)}%  ${sparkline(m.cpu.series.map((p) => p.maximum))}`);
     }
     if (m.memory) {
       const abs = m.taskMemoryMiB
         ? `  (avg ${percentToMiB(m.memory.average, m.taskMemoryMiB)} MiB, peak ${percentToMiB(m.memory.maximum, m.taskMemoryMiB)} MiB)`
         : '';
-      lines.push(`  memory: avg ${m.memory.average.toFixed(1)}%  peak ${m.memory.maximum.toFixed(1)}%${abs}`);
+      lines.push(`  memory: avg ${m.memory.average.toFixed(1)}%  peak ${m.memory.maximum.toFixed(1)}%${abs}  ${sparkline(m.memory.series.map((p) => p.maximum))}`);
     }
     if (m.liveTasks) lines.push(`  tasks:  avg ${m.liveTasks.average.toFixed(2)}`);
+
+    // CPUUtilization is a task-level metric: an ECS Exec session's own CPU lands in it.
+    // Without the timeline you cannot tell the game from the observer.
+    if (showSeries && m.cpu && m.cpu.series.length > 0) {
+      lines.push('  cpu timeline (avg / peak):');
+      for (const p of m.cpu.series) {
+        lines.push(`    ${p.at}  ${p.average.toFixed(1).padStart(5)}% / ${p.maximum.toFixed(1).padStart(5)}%`);
+      }
+    }
     return textResult(lines.join('\n'));
   },
 );
@@ -367,15 +389,22 @@ server.registerTool(
     inputSchema: {
       service: z.string(),
       container: z.enum(['game-server', 'rcon-control', 'idle-shutdown']).optional(),
-      minutes: z.number().int().min(1).max(1440).optional().describe('Lookback window, default 30'),
+      minutes: z.number().int().min(1).max(1440).optional().describe('Relative lookback, default 30'),
+      since: z
+        .string()
+        .optional()
+        .describe('Absolute window start, e.g. "2026-07-09T19:46:00Z". Overrides minutes.'),
+      until: z.string().optional().describe('Absolute window end. Requires since; defaults to now.'),
       pattern: z.string().optional().describe('CloudWatch filter pattern, e.g. "ERROR"'),
       limit: z.number().int().min(1).max(200).optional(),
     },
   },
-  async ({ service, container, minutes, pattern, limit }) => {
+  async ({ service, container, minutes, since, until, pattern, limit }) => {
     const { logGroup, events } = await fetchLogs(service, awsOpts, {
       ...(container !== undefined ? { container } : {}),
       ...(minutes !== undefined ? { minutes } : {}),
+      ...(since !== undefined ? { since } : {}),
+      ...(until !== undefined ? { until } : {}),
       ...(pattern !== undefined ? { pattern } : {}),
       ...(limit !== undefined ? { limit } : {}),
     });

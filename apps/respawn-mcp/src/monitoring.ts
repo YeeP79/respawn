@@ -84,13 +84,30 @@ export interface MetricSummary {
   average: number;
   maximum: number;
   samples: number;
+  series: MetricPoint[];
 }
 
 interface Datapoint {
+  Timestamp?: string;
   Average?: number;
   Maximum?: number;
 }
 
+/** One datapoint, oldest first — the shape an avg/peak pair throws away. */
+export interface MetricPoint {
+  at: string;
+  average: number;
+  maximum: number;
+}
+
+/**
+ * Collapses a series to avg/peak *and keeps the series*.
+ *
+ * A bare avg/peak cannot distinguish a startup spike from sustained saturation, and
+ * both look identical next to a healthy server. Worse, `CPUUtilization` is a *task*
+ * metric: an ECS Exec session's own CPU lands in it, so a peak can be the observer
+ * rather than the game. Only the timeline shows which.
+ */
 export function summarizeDatapoints(points: Datapoint[]): MetricSummary | undefined {
   const avgs = points.map((p) => p.Average).filter((n): n is number => typeof n === 'number');
   const maxes = points.map((p) => p.Maximum).filter((n): n is number => typeof n === 'number');
@@ -99,7 +116,24 @@ export function summarizeDatapoints(points: Datapoint[]): MetricSummary | undefi
     average: avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : 0,
     maximum: maxes.length ? Math.max(...maxes) : 0,
     samples: points.length,
+    series: points
+      .filter((p) => typeof p.Timestamp === 'string')
+      .map((p) => ({ at: p.Timestamp!, average: p.Average ?? 0, maximum: p.Maximum ?? 0 }))
+      .sort((a, b) => a.at.localeCompare(b.at)),
   };
+}
+
+/** Renders a series as a sparkline so shape is legible without reading every number. */
+const SPARK = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const;
+
+export function sparkline(values: number[], max = 100): string {
+  if (values.length === 0) return '';
+  return values
+    .map((v) => {
+      const idx = Math.min(SPARK.length - 1, Math.max(0, Math.round((v / max) * (SPARK.length - 1))));
+      return SPARK[idx]!;
+    })
+    .join('');
 }
 
 /**
@@ -324,6 +358,7 @@ export async function fetchHealth(
 export interface MetricsReport {
   service: string;
   minutes: number;
+  periodSeconds: number;
   taskCpuUnits?: number;
   taskMemoryMiB?: number;
   cpu?: MetricSummary;
@@ -336,12 +371,13 @@ async function getMetric(
   serviceName: string,
   metric: string,
   minutes: number,
+  periodSeconds: number,
   opts: AwsOpts,
 ): Promise<MetricSummary | undefined> {
   const end = new Date();
   const start = new Date(end.getTime() - minutes * 60_000);
-  // 5 minutes is the finest AWS/ECS publishes without Container Insights; asking for
-  // less silently returns empty datapoints rather than an error.
+  // ECS publishes 1-minute datapoints; a 300s period aggregates five of them and hides
+  // short spikes inside the average. CloudWatch keeps 1-minute resolution for 15 days.
   const res = await runAwsJson(
     [
       'cloudwatch',
@@ -358,7 +394,7 @@ async function getMetric(
       '--end-time',
       end.toISOString(),
       '--period',
-      '300',
+      String(periodSeconds),
       '--statistics',
       'Average',
       'Maximum',
@@ -374,6 +410,7 @@ export async function fetchMetrics(
   service: string,
   minutes: number,
   opts: AwsOpts,
+  periodSeconds = 300,
 ): Promise<MetricsReport> {
   const found = await findServiceCluster(service, opts);
   if (!found) throw new Error(`No respawn cluster for service "${service}".`);
@@ -398,14 +435,15 @@ export async function fetchMetrics(
   }
 
   const [cpu, memory, liveTasks] = await Promise.all([
-    getMetric(clusterName, found.serviceName, 'CPUUtilization', minutes, opts),
-    getMetric(clusterName, found.serviceName, 'MemoryUtilization', minutes, opts),
-    getMetric(clusterName, found.serviceName, 'LiveTaskCount', minutes, opts),
+    getMetric(clusterName, found.serviceName, 'CPUUtilization', minutes, periodSeconds, opts),
+    getMetric(clusterName, found.serviceName, 'MemoryUtilization', minutes, periodSeconds, opts),
+    getMetric(clusterName, found.serviceName, 'LiveTaskCount', minutes, periodSeconds, opts),
   ]);
 
   return {
     service,
     minutes,
+    periodSeconds,
     ...(taskCpuUnits !== undefined ? { taskCpuUnits } : {}),
     ...(taskMemoryMiB !== undefined ? { taskMemoryMiB } : {}),
     ...(cpu !== undefined ? { cpu } : {}),
@@ -421,6 +459,44 @@ export interface LogEvent {
 }
 
 /**
+ * Resolves a log window from either a relative lookback or an absolute range.
+ *
+ * A relative-only window cannot express "show me the minute that task died three
+ * hours ago", which is the question you actually have once `server_health` hands you
+ * a `stoppedAt` timestamp. `since`/`until` accept anything `Date` parses, ISO chief
+ * among them, and `until` may be omitted to mean "up to now".
+ *
+ * @throws On an unparseable timestamp, rather than silently querying the epoch.
+ */
+export function resolveWindow(params: {
+  minutes?: number;
+  since?: string;
+  until?: string;
+  now?: number;
+}): { start: number; end?: number } {
+  const now = params.now ?? Date.now();
+
+  const parse = (label: string, value: string): number => {
+    const ms = Date.parse(value);
+    if (Number.isNaN(ms)) throw new Error(`${label} is not a parseable timestamp: "${value}"`);
+    return ms;
+  };
+
+  if (params.since !== undefined) {
+    const start = parse('since', params.since);
+    const end = params.until !== undefined ? parse('until', params.until) : undefined;
+    if (end !== undefined && end <= start) {
+      throw new Error(`until (${params.until}) must be after since (${params.since})`);
+    }
+    return end !== undefined ? { start, end } : { start };
+  }
+  if (params.until !== undefined) {
+    throw new Error('until requires since — an open-ended window backwards is not a window');
+  }
+  return { start: now - (params.minutes ?? 30) * 60_000 };
+}
+
+/**
  * Tails a service's CloudWatch logs, optionally for one container.
  *
  * Log streams are named `<container>/<container>/<taskId>`, so a container filter is
@@ -429,12 +505,19 @@ export interface LogEvent {
 export async function fetchLogs(
   service: string,
   opts: AwsOpts,
-  params: { environment?: string; container?: string; minutes?: number; pattern?: string; limit?: number } = {},
+  params: {
+    environment?: string;
+    container?: string;
+    minutes?: number;
+    since?: string;
+    until?: string;
+    pattern?: string;
+    limit?: number;
+  } = {},
 ): Promise<{ logGroup: string; events: LogEvent[] }> {
   const env = params.environment ?? 'dev';
-  const minutes = params.minutes ?? 30;
   const logGroup = `/respawn/${env}/${service}`;
-  const start = Date.now() - minutes * 60_000;
+  const { start, end } = resolveWindow(params);
 
   const args = [
     'logs',
@@ -446,6 +529,7 @@ export async function fetchLogs(
     '--limit',
     String(params.limit ?? 50),
   ];
+  if (end !== undefined) args.push('--end-time', String(end));
   if (params.container) args.push('--log-stream-name-prefix', `${params.container}/`);
   if (params.pattern) args.push('--filter-pattern', params.pattern);
 
