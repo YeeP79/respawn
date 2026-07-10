@@ -1,0 +1,46 @@
+{
+  "displayName": "Wolfenstein: Enemy Territory",
+  "engine": "idtech3",
+  "notes": "ET: Legacy engine, idTech3 rcon (one connectionless UDP packet on the game port, gated only by rconpassword). Query patterns verified live against etlegacy/server with omni-bots connected. The `players` query's `raw` field carries the rcon `status` reply, which includes an address column with player IPs — visible only to an operator who already has rcon. Player names are returned with their ^-colour codes intact; the sidecar does not strip them.",
+  "maps": ["oasis", "goldrush", "battery", "radar", "railgun", "fueldump", "supplydepot", "et_beach"],
+  "commands": [
+    { "name": "change_map", "description": "Load a map immediately (e.g. oasis, goldrush).", "rcon": "map {map}", "args": { "map": {} } },
+    { "name": "restart_map", "description": "Restart the current map.", "rcon": "map_restart" },
+    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick {player}", "args": { "player": {} }, "danger": true },
+    { "name": "kick_slot", "description": "Kick a player by their status slot number.", "rcon": "clientkick {slot}", "args": { "slot": {} }, "danger": true },
+    { "name": "say", "description": "Broadcast a server message to everyone.", "rcon": "say {message}", "args": { "message": {} } },
+    { "name": "set_cvar", "description": "Set any server cvar.", "rcon": "set {cvar} {value}", "args": { "cvar": {}, "value": {} } }
+  ],
+  "queries": [
+    {
+      "name": "server_info",
+      "description": "Server name, current map, gametype and slot count, from the rcon serverinfo reply.",
+      "rcon": "serverinfo",
+      "singles": {
+        "hostname": "^sv_hostname\\s+(.+?)\\s*$",
+        "map": "^mapname\\s+(\\S+)",
+        "gameType": "^g_gametype\\s+(\\d+)",
+        "maxClients": "^sv_maxclients\\s+(\\d+)",
+        "version": "^version\\s+(.+?)\\s*$"
+      }
+    },
+    {
+      "name": "players",
+      "description": "Connected players (slot, score, ping, name) from the rcon status table. Humans and bots both appear; names keep their ^-colour codes.",
+      "rcon": "status",
+      "singles": { "map": "^map\\s*:\\s*(\\S+)" },
+      "row": {
+        "match": "^(\\d+)\\s+(-?\\d+)\\s+(\\d+)\\s+(.+?)\\s+\\d+\\s+(?:bot|\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+)",
+        "fields": ["slot", "score", "ping", "name"]
+      }
+    }
+  ],
+  "cvars": [
+    { "name": "timelimit", "description": "Minutes per map (0 = none).", "default": "0", "range": [0, 120] },
+    { "name": "g_gametype", "description": "2 Objective, 3 Stopwatch, 4 Campaign, 5 Last-Man-Standing, 6 Map-Voting.", "default": "6", "values": ["2", "3", "4", "5", "6"] },
+    { "name": "g_password", "description": "Server join password ('' = public).", "default": "" },
+    { "name": "sv_maxclients", "description": "Player slots.", "default": "24", "range": [1, 64] },
+    { "name": "g_gravity", "description": "World gravity.", "default": "800", "range": [0, 2000] },
+    { "name": "omnibot_enable", "description": "Enable omni-bot support (1 on, 0 off).", "default": "0", "values": ["0", "1"] }
+  ]
+}

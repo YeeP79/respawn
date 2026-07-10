@@ -433,6 +433,29 @@ describe('loadConfig', () => {
     expect(config.image.imageUri).toBeUndefined();
   });
 
+  describe('INTERNAL_PORTS', () => {
+    it('parses internal ports separately from additional ports', () => {
+      const dir = path.join(FIXTURES_DIR, 'internal-ports');
+      writeEnvFile(
+        dir,
+        'SERVICE_NAME=x\nADDITIONAL_PORTS=27005/udp\nINTERNAL_PORTS=27015/tcp',
+      );
+      const { networking } = loadConfig(dir, 'dev');
+      expect(networking.additionalPorts).toEqual([
+        { containerPort: 27005, hostPort: 27005, protocol: 'UDP' },
+      ]);
+      expect(networking.internalPorts).toEqual([
+        { containerPort: 27015, hostPort: 27015, protocol: 'TCP' },
+      ]);
+    });
+
+    it('defaults internalPorts to empty', () => {
+      const dir = path.join(FIXTURES_DIR, 'no-internal');
+      writeEnvFile(dir, 'SERVICE_NAME=x');
+      expect(loadConfig(dir, 'dev').networking.internalPorts).toEqual([]);
+    });
+  });
+
   describe('idle check method', () => {
     it.each([
       ['netstat', 'netstat'],
@@ -574,6 +597,36 @@ describe('loadConfig', () => {
       const dir = path.join(FIXTURES_DIR, 'rc-default-proto');
       writeEnvFile(dir, 'SERVICE_NAME=x\nSECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon\nENABLE_RCON_CONTROL=true');
       expect(loadConfig(dir, 'dev').rconControl.protocol).toBe('goldsrc');
+    });
+
+    it('accepts the query-only gamespy protocol', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-gamespy');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PORT=7778',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+      ].join('\n'));
+      expect(loadConfig(dir, 'dev').rconControl).toMatchObject({
+        protocol: 'gamespy',
+        port: 7778,
+        passwordSecretVar: 'UT_ADMINPWD',
+      });
+    });
+
+    it('rejects an unknown protocol instead of falling back to goldsrc', () => {
+      // A silent fallback would point the sidecar at the wrong wire protocol and every
+      // rcon call would time out with nothing to explain why.
+      const dir = path.join(FIXTURES_DIR, 'rc-bad-proto');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=goldsrk',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid RCON_PROTOCOL/);
     });
 
     it('rejects enablement without the rcon secret', () => {

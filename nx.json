@@ -9,7 +9,8 @@
       "!{projectRoot}/src/test-setup.[jt]s",
       "!{projectRoot}/eslint.config.mjs"
     ],
-    "sharedGlobals": []
+    "sharedGlobals": [],
+    "gameManifests": ["{workspaceRoot}/apps/*/rcon-manifest.json"]
   },
   "targetDefaults": {
     "build": {

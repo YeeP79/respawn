@@ -3,6 +3,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
@@ -35,12 +37,42 @@ export class GameServerFargateService extends Construct {
     super(scope, id);
 
     const { config } = props;
+    const rconEnabled = config.rconControl.enabled;
+
+    // When the rcon-control sidecar is on, audit every ECS Exec session to
+    // CloudWatch — a record of who ran what. The channel is already TLS +
+    // IAM-authenticated by SSM.
+    //
+    // A customer KMS session key was removed here on the theory that it caused
+    // "Cannot perform start session: EOF". That was a misdiagnosis: the EOF comes
+    // from `aws ecs execute-command --interactive` being given a stdin that is not
+    // a TTY, and reproduces with KMS entirely absent (see exec.ts in respawn-mcp).
+    // KMS was never ruled out on its own merits and can be reinstated; the audit
+    // log is the durable hardening either way.
+    let execConfig: ecs.ExecuteCommandConfiguration | undefined;
+    let execKey: kms.Key | undefined;
+    let execLogGroup: logs.LogGroup | undefined;
+    if (rconEnabled) {
+      execLogGroup = new logs.LogGroup(this, 'ExecAuditLog', {
+        logGroupName: `/respawn/${config.environment}/${config.serviceName}/exec-audit`,
+        retention: logs.RetentionDays.ONE_YEAR,
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      execConfig = {
+        logging: ecs.ExecuteCommandLogging.OVERRIDE,
+        logConfiguration: {
+          cloudWatchLogGroup: execLogGroup,
+          cloudWatchEncryptionEnabled: false,
+        },
+      };
+    }
 
     // Cluster
     this.cluster = new ecs.Cluster(this, 'Cluster', {
       vpc: props.vpc,
       clusterName: `respawn-${config.environment}-${config.serviceName}`,
       enableFargateCapacityProviders: true,
+      executeCommandConfiguration: execConfig,
     });
 
     // Logging
@@ -86,6 +118,15 @@ export class GameServerFargateService extends Construct {
       },
     ];
     for (const ap of config.networking.additionalPorts) {
+      portMappings.push({
+        containerPort: ap.containerPort,
+        hostPort: ap.hostPort,
+        protocol: ap.protocol === 'UDP' ? ecs.Protocol.UDP : ecs.Protocol.TCP,
+      });
+    }
+    // Internal ports are declared on the task but get NO security-group ingress
+    // (see GameServerNetworking): the sidecar reaches them over loopback.
+    for (const ap of config.networking.internalPorts) {
       portMappings.push({
         containerPort: ap.containerPort,
         hostPort: ap.hostPort,
@@ -199,6 +240,20 @@ export class GameServerFargateService extends Construct {
           resources: ['*'],
         }),
       );
+
+      // The KMS key encrypts the exec data channel; the task must be able to use it.
+      execKey?.grantEncryptDecrypt(taskDefinition.taskRole);
+
+      // The task writes each exec session to the audit log group.
+      if (execLogGroup) {
+        execLogGroup.grantWrite(taskDefinition.taskRole);
+        taskDefinition.taskRole.addToPrincipalPolicy(
+          new iam.PolicyStatement({
+            actions: ['logs:DescribeLogGroups'],
+            resources: ['*'],
+          }),
+        );
+      }
     }
 
     // Fargate service

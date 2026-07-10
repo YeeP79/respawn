@@ -1,0 +1,5 @@
+{
+  "name": "wolfet",
+  "projectType": "application",
+  "tags": ["type:app", "lang:dockerfile"]
+}

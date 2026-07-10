@@ -1,0 +1,34 @@
+{
+  "displayName": "Counter-Strike: Source",
+  "engine": "source",
+  "notes": "Source engine, rcon over TCP via the sidecar. Command forms are the standard Source console set; not yet verified against a live server.",
+  "maps": "live",
+  "commands": [
+    { "name": "change_map", "description": "Switch map now (e.g. de_dust2, cs_office).", "rcon": "changelevel {map}", "args": { "map": { "type": "string" } } },
+    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick \"{player}\"", "args": { "player": { "description": "Exact player name" } }, "danger": true },
+    { "name": "kick_userid", "description": "Kick by numeric userid (from the players query).", "rcon": "kickid {userid}", "args": { "userid": { "type": "int" } }, "danger": true },
+    { "name": "ban_userid", "description": "Ban a userid for N minutes (0 = permanent).", "rcon": "banid {minutes} {userid} kick", "args": { "minutes": { "type": "int" }, "userid": { "type": "int" } }, "danger": true },
+    { "name": "add_bot", "description": "Add a bot to the game.", "rcon": "bot_add" },
+    { "name": "kick_bots", "description": "Remove all bots.", "rcon": "bot_kick" },
+    { "name": "say", "description": "Broadcast a message to everyone.", "rcon": "say {message}", "args": { "message": {} } },
+    { "name": "set_join_password", "description": "Set/clear the join password (empty clears).", "rcon": "sv_password {password}", "args": { "password": {} } }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name, steamid, and the current map.",
+      "rcon": "status",
+      "singles": { "hostname": "^hostname\\s*:\\s*(.+)$", "map": "^map\\s*:\\s*(\\S+)", "playerCount": "^players\\s*:\\s*(.+)$" },
+      "row": { "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|\\[U:\\S+)?", "fields": ["userid", "name", "steamid"], "skipIf": "^#\\s*userid" }
+    }
+  ],
+  "cvars": [
+    { "name": "mp_friendlyfire", "description": "Team damage.", "default": "0", "values": ["0", "1"] },
+    { "name": "mp_roundtime", "description": "Round length in minutes.", "default": "5", "range": [1, 9] },
+    { "name": "mp_startmoney", "description": "Starting money.", "default": "800", "range": [800, 16000] },
+    { "name": "mp_freezetime", "description": "Buy/freeze time at round start, seconds.", "default": "6", "range": [0, 60] },
+    { "name": "mp_autoteambalance", "description": "Auto-balance teams.", "default": "1", "values": ["0", "1"] },
+    { "name": "sv_alltalk", "description": "Both teams hear each other's voice.", "default": "0", "values": ["0", "1"] },
+    { "name": "bot_quota", "description": "Number of bots to maintain.", "default": "0", "range": [0, 32] }
+  ]
+}

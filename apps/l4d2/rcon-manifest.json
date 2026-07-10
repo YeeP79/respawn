@@ -1,0 +1,29 @@
+{
+  "displayName": "Left 4 Dead 2",
+  "engine": "source",
+  "notes": "Source engine, rcon over TCP via the sidecar. Standard Source console + L4D2 director/difficulty cvars; not yet verified against a live server.",
+  "maps": "live",
+  "commands": [
+    { "name": "change_map", "description": "Load a campaign map (e.g. c1m1_hotel, c2m1_highway).", "rcon": "map {map}", "args": { "map": { "type": "string" } } },
+    { "name": "change_mode_and_map", "description": "Set the game mode and load a map together.", "rcon": "map {map} {mode}", "args": { "map": { "type": "string" }, "mode": { "description": "coop | versus | survival | realism | scavenge" } } },
+    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick \"{player}\"", "args": { "player": {} }, "danger": true },
+    { "name": "kick_userid", "description": "Kick by numeric userid (from the players query).", "rcon": "kickid {userid}", "args": { "userid": { "type": "int" } }, "danger": true },
+    { "name": "say", "description": "Broadcast a message to everyone.", "rcon": "say {message}", "args": { "message": {} } },
+    { "name": "set_join_password", "description": "Set/clear the join password (empty clears).", "rcon": "sv_password {password}", "args": { "password": {} } }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name, steamid, and the current map.",
+      "rcon": "status",
+      "singles": { "hostname": "^hostname\\s*:\\s*(.+)$", "map": "^map\\s*:\\s*(\\S+)", "playerCount": "^players\\s*:\\s*(.+)$" },
+      "row": { "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|\\[U:\\S+)?", "fields": ["userid", "name", "steamid"], "skipIf": "^#\\s*userid" }
+    }
+  ],
+  "cvars": [
+    { "name": "z_difficulty", "description": "Difficulty: Easy, Normal, Hard, Impossible.", "default": "Normal", "values": ["Easy", "Normal", "Hard", "Impossible"] },
+    { "name": "mp_gamemode", "description": "Game mode.", "default": "coop", "values": ["coop", "versus", "survival", "realism", "scavenge"] },
+    { "name": "sv_alltalk", "description": "Everyone hears each other's voice.", "default": "0", "values": ["0", "1"] },
+    { "name": "director_no_specials", "description": "Disable special infected spawns.", "default": "0", "values": ["0", "1"] }
+  ]
+}

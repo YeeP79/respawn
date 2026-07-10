@@ -89,6 +89,13 @@ export interface NetworkingConfig {
   hostPort: number;
   protocol: 'TCP' | 'UDP';
   additionalPorts: AdditionalPort[];
+  /**
+   * Ports the task uses but that must NOT be publicly reachable — rcon (TCP),
+   * web panels, telnet. They get a port mapping (so the task documents them) but
+   * no security-group ingress. The rcon-control sidecar reaches them over
+   * loopback within the task, so they never need to face the internet.
+   */
+  internalPorts: AdditionalPort[];
   enablePublicAccess: boolean;
 }
 
@@ -168,10 +175,13 @@ export interface RedisConfig {
  * Enabled by `ENABLE_RCON_CONTROL`; needs a `SECRET_REFS` entry naming the rcon
  * password so it can be injected without appearing in the task definition.
  */
+/** Wire protocol the rcon-control sidecar speaks to the game. */
+export type RconProtocol = 'goldsrc' | 'source' | 'q3' | 'zandronum' | 'gamespy';
+
 export interface RconControlConfig {
   enabled: boolean;
-  /** Wire protocol: 'goldsrc' (UDP, GoldSrc) or 'source' (TCP, Source/Source 2). */
-  protocol: 'goldsrc' | 'source';
+  /** Wire protocol the rcon-control sidecar speaks to the game. */
+  protocol: RconProtocol;
   /** Container env var (from SECRET_REFS) holding the rcon password. */
   passwordSecretVar: string;
   /** Port the game answers rcon on. Defaults to the container port. */

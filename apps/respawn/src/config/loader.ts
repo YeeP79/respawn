@@ -6,6 +6,7 @@ import type {
   DeployPrompt,
   Environment,
   GameServerConfig,
+  RconProtocol,
   SecretRef,
   UpdateCheck,
 } from './types.js';
@@ -71,6 +72,25 @@ function parseCheckMethod(
     return lower;
   }
   return undefined;
+}
+
+const RCON_PROTOCOLS = ['goldsrc', 'source', 'q3', 'zandronum', 'gamespy'] as const;
+
+/**
+ * @throws On an unrecognised protocol. Returning undefined would fall through to the
+ *   `goldsrc` default, so a typo would silently point the sidecar at the wrong wire
+ *   protocol and every rcon call would time out for no visible reason.
+ */
+function parseRconProtocol(value: string | undefined): RconProtocol | undefined {
+  if (value === undefined || value === '') return undefined;
+  const lower = value.toLowerCase();
+  const match = RCON_PROTOCOLS.find((p) => p === lower);
+  if (!match) {
+    throw new Error(
+      `Invalid RCON_PROTOCOL: ${value}. Expected one of ${RCON_PROTOCOLS.join(', ')}.`,
+    );
+  }
+  return match;
 }
 
 function parseGameEnvVars(env: Record<string, string>): Record<string, string> {
@@ -487,6 +507,7 @@ export function loadConfig(
       protocol:
         parseProtocol(env['PROTOCOL']) ?? DEFAULT_NETWORKING.protocol,
       additionalPorts: parseAdditionalPorts(env['ADDITIONAL_PORTS']),
+      internalPorts: parseAdditionalPorts(env['INTERNAL_PORTS']),
       enablePublicAccess:
         parseBoolean(env['ENABLE_PUBLIC_ACCESS']) ??
         DEFAULT_NETWORKING.enablePublicAccess,
@@ -575,12 +596,7 @@ export function loadConfig(
       enabled:
         parseBoolean(env['ENABLE_RCON_CONTROL']) ??
         DEFAULT_RCON_CONTROL.enabled,
-      protocol:
-        (env['RCON_PROTOCOL']?.toLowerCase() === 'source'
-          ? 'source'
-          : env['RCON_PROTOCOL']?.toLowerCase() === 'goldsrc'
-            ? 'goldsrc'
-            : undefined) ?? DEFAULT_RCON_CONTROL.protocol,
+      protocol: parseRconProtocol(env['RCON_PROTOCOL']) ?? DEFAULT_RCON_CONTROL.protocol,
       passwordSecretVar:
         env['RCON_PASSWORD_VAR'] || DEFAULT_RCON_CONTROL.passwordSecretVar,
       port: parseNumber(env['RCON_PORT']),

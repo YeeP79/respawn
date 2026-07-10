@@ -5,6 +5,8 @@
 # python3 is already present in this base, so nothing needs installing.
 FROM python:3.12-slim
 
+# CDK builds this via fromAsset(sidecarDir), so the context is THIS directory —
+# COPY paths are relative to it, not the repo root (unlike the game images).
 COPY rcon.py /usr/local/bin/rcon.py
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/rcon.py /usr/local/bin/entrypoint.sh

@@ -1,0 +1,31 @@
+{
+  "displayName": "Unreal Tournament 99",
+  "engine": "other",
+  "notes": "UT99 has no rcon. The rcon-control sidecar speaks GameSpy v1 to the query port (game port + 1), which is read-only and unauthenticated — hence no commands and no cvars here. rcon.py normalises the backslash-delimited infostring into `key=value` lines, which is what these patterns match. Writes (kick, say, changelevel) live behind the UWeb admin on 5580 and would need a separate transport.",
+  "queries": [
+    {
+      "name": "server_info",
+      "description": "Server name, current map, game type and player count, from the GameSpy \\info\\ query.",
+      "rcon": "info",
+      "singles": {
+        "hostname": "^hostname=(.*)$",
+        "map": "^mapname=(.*)$",
+        "mapTitle": "^maptitle=(.*)$",
+        "gameType": "^gametype=(.*)$",
+        "playerCount": "^numplayers=(\\d+)$",
+        "maxPlayers": "^maxplayers=(\\d+)$",
+        "gameMode": "^gamemode=(.*)$",
+        "version": "^gamever=(.*)$"
+      }
+    },
+    {
+      "name": "players",
+      "description": "Human players (name, score, ping, team) from the GameSpy \\players\\ query. Verified live: bots do NOT appear here however many are in the match, and a player drops from the list while dead/respawning, so treat this as a live snapshot of connected humans, not a roster. The query port exposes no IPs.",
+      "rcon": "players",
+      "row": {
+        "match": "^player=(.*?)\\tfrags=(-?\\d+)\\tping=(\\d+)\\tteam=(\\d+)",
+        "fields": ["name", "score", "ping", "team"]
+      }
+    }
+  ]
+}

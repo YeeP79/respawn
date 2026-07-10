@@ -1,0 +1,29 @@
+{
+  "displayName": "Garry's Mod",
+  "engine": "source",
+  "notes": "Source engine, rcon over TCP via the sidecar. Base Source console; a gamemode change needs a map reload with the gamemode arg. ULX/admin-mod commands would be added here as mod commands once installed. Not yet verified against a live server.",
+  "maps": "live",
+  "commands": [
+    { "name": "change_map", "description": "Load a map (e.g. gm_construct, gm_flatgrass).", "rcon": "changelevel {map}", "args": { "map": { "type": "string" } } },
+    { "name": "change_gamemode", "description": "Switch gamemode by reloading a map with it (e.g. sandbox, terrortown, prop_hunt, darkrp).", "rcon": "changelevel {map} {gamemode}", "args": { "map": { "type": "string" }, "gamemode": { "description": "sandbox | terrortown | prop_hunt | darkrp | …" } } },
+    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick \"{player}\"", "args": { "player": {} }, "danger": true },
+    { "name": "kick_userid", "description": "Kick by numeric userid (from the players query).", "rcon": "kickid {userid}", "args": { "userid": { "type": "int" } }, "danger": true },
+    { "name": "say", "description": "Broadcast a message to everyone.", "rcon": "say {message}", "args": { "message": {} } },
+    { "name": "set_join_password", "description": "Set/clear the join password (empty clears).", "rcon": "sv_password {password}", "args": { "password": {} } }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name, steamid, and the current map.",
+      "rcon": "status",
+      "singles": { "hostname": "^hostname\\s*:\\s*(.+)$", "map": "^map\\s*:\\s*(\\S+)", "playerCount": "^players\\s*:\\s*(.+)$" },
+      "row": { "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|\\[U:\\S+)?", "fields": ["userid", "name", "steamid"], "skipIf": "^#\\s*userid" }
+    }
+  ],
+  "cvars": [
+    { "name": "sv_gravity", "description": "World gravity; 600 is GMod default.", "default": "600", "range": [100, 2000] },
+    { "name": "sv_alltalk", "description": "Everyone hears each other's voice.", "default": "1", "values": ["0", "1"] },
+    { "name": "sbox_maxprops", "description": "Max props per player (sandbox).", "default": "150", "range": [0, 2000] },
+    { "name": "phys_timescale", "description": "Physics speed multiplier.", "default": "1", "range": [0, 10] }
+  ]
+}
