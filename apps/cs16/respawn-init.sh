@@ -18,6 +18,9 @@ CFG="/opt/steam/hlds/${GAME}/server.cfg"
 
 SERVERNAME="${SERVERNAME:-Respawn CS 1.6}"
 RCON_PASSWORD="${RCON_PASSWORD:-}"
+# Join password (sv_password). Injected as an ECS secret like rcon, so it never
+# lands in the task definition; the shim writes it into server.cfg. Unset = open.
+SERVER_PASSWORD="${SERVER_PASSWORD:-}"
 
 # Overwrites the image's stock server.cfg. Safe here: cs16 has no persistent
 # volume and no SteamCMD install step, so nothing else ever writes this file.
@@ -28,6 +31,19 @@ RCON_PASSWORD="${RCON_PASSWORD:-}"
   if [ -n "${RCON_PASSWORD}" ]; then
     echo "rcon_password \"${RCON_PASSWORD}\""
   fi
+  if [ -n "${SERVER_PASSWORD}" ]; then
+    echo "sv_password \"${SERVER_PASSWORD}\""
+  fi
+  # Networking defaults. GoldSrc ships sv_maxupdaterate at 30, which caps every
+  # client to 30 snapshots/sec regardless of their own rates and shows up as
+  # "had to click twice to fire" (dropped +attack). 100+ with lag compensation
+  # is the norm. Baked here so it survives the scale-to-zero cold start that a
+  # live rcon change would not. Override per-server with GAME_ENV_* if needed.
+  echo "sv_unlag 1"
+  echo "sv_maxupdaterate ${SV_MAXUPDATERATE:-101}"
+  echo "sv_minupdaterate ${SV_MINUPDATERATE:-20}"
+  echo "sv_maxrate ${SV_MAXRATE:-100000}"
+  echo "sv_minrate ${SV_MINRATE:-5000}"
 } > "${CFG}"
 
 if [ -n "${RCON_PASSWORD}" ]; then
