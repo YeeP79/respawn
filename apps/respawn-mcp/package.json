@@ -6,6 +6,7 @@
   "bin": { "respawn-mcp": "./dist/index.js" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@respawn/core": "workspace:*",
     "zod": "^3.24.1"
   }
 }

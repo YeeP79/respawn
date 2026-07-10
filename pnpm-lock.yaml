@@ -112,6 +112,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
+      '@respawn/core':
+        specifier: workspace:*
+        version: link:../../libs/core
       zod:
         specifier: ^3.24.1
         version: 3.25.76
