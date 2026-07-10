@@ -10,12 +10,6 @@
   "references": [
     {
       "path": "../../libs/core/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/docker-utils/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/shared-types/tsconfig.lib.json"
     }
   ]
 }

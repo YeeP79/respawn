@@ -1,0 +1,15 @@
+{
+  "name": "cli",
+  "projectType": "application",
+  "sourceRoot": "apps/cli/src",
+  "tags": ["type:app", "lang:ts"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc -p apps/cli/tsconfig.build.json",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}

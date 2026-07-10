@@ -1,51 +1,16 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
-import type { Action, ActionResult, DiscoveredService, Environment } from '@respawn/core';
-import { discoverServices } from '@respawn/core';
-import { setVerbose } from '@respawn/core';
-import { deploy, synth, diff, push, updates } from '@respawn/core';
-import { destroy } from './actions/destroy.js';
-import { status } from './actions/status.js';
+import type { Action, ActionResult, Environment } from '@respawn/core';
+import { discoverServices, setVerbose } from '@respawn/core';
 import { runSecrets } from './actions/secrets.js';
-
+import { ACTION_HANDLERS, ACTION_LABELS } from './handlers.js';
 
 /** Top-level menu: the CDK actions plus the interactive-only Secrets flow. */
 type MenuChoice = Action | 'secrets';
 
-const ACTION_LABELS: Record<Action, string> = {
-  deploy: 'Deploy — Build, push, and deploy game servers',
-  push: 'Push — Build and push images to ECR (no deploy)',
-  updates: 'Updates — Check for upstream image / game updates',
-  destroy: 'Destroy — Tear down game server infrastructure',
-  synth: 'Synth — Preview CloudFormation templates',
-  diff: 'Diff — Show pending infrastructure changes',
-  status: 'Status — Check running game server status',
-};
-
 const MENU_LABELS: Record<MenuChoice, string> = {
   ...ACTION_LABELS,
   secrets: 'Secrets — Set or rotate secret values (Secrets Manager / SSM)',
-};
-
-const ACTION_HANDLERS: Record<
-  Action,
-  (ctx: {
-    service: DiscoveredService;
-    environment: Environment;
-    workspaceRoot: string;
-    verbose?: boolean;
-    profile?: string;
-    force?: boolean;
-    gameEnvOverrides?: Record<string, string>;
-  }) => Promise<ActionResult>
-> = {
-  deploy,
-  destroy,
-  synth,
-  diff,
-  status,
-  push,
-  updates,
 };
 
 export async function runCli(options: {
