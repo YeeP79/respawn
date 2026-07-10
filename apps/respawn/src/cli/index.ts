@@ -3,13 +3,9 @@ import chalk from 'chalk';
 import type { Action, ActionResult, DiscoveredService, Environment } from '@respawn/core';
 import { discoverServices } from '@respawn/core';
 import { setVerbose } from '@respawn/core';
-import { deploy } from './actions/deploy.js';
+import { deploy, synth, diff, push, updates } from '@respawn/core';
 import { destroy } from './actions/destroy.js';
-import { synth } from './actions/synth.js';
-import { diff } from './actions/diff.js';
 import { status } from './actions/status.js';
-import { push } from './actions/push.js';
-import { updates } from './actions/updates.js';
 import { runSecrets } from './actions/secrets.js';
 
 

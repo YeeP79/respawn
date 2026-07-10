@@ -1,11 +1,7 @@
 import { resolveBaseImageDigest } from '@respawn/docker-utils';
-import type {
-  ActionResult,
-  DiscoveredService,
-  Environment,
-} from '@respawn/core';
-import { logger } from '@respawn/core';
-import { readState, writeState } from '@respawn/core';
+import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import { logger } from '../utils/logger.js';
+import { readState, writeState } from '../utils/ssm-state.js';
 import {
   checkKey,
   checkLabel,
@@ -13,7 +9,7 @@ import {
   fetchSteamBuildId,
   hasActionableUpdate,
   type CheckResult,
-} from '@respawn/core';
+} from '../utils/update-check.js';
 import { resolveImage } from './push.js';
 
 export interface UpdatesContext {

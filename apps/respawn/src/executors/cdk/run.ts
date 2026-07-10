@@ -5,13 +5,9 @@
 import type { Action, Environment, ActionResult } from '@respawn/core';
 import { discoverServices } from '@respawn/core';
 import { setVerbose, logger } from '@respawn/core';
-import { deploy } from '../../cli/actions/deploy.js';
+import { deploy, synth, diff, push, updates } from '@respawn/core';
 import { destroy } from '../../cli/actions/destroy.js';
-import { synth } from '../../cli/actions/synth.js';
-import { diff } from '../../cli/actions/diff.js';
 import { status } from '../../cli/actions/status.js';
-import { push } from '../../cli/actions/push.js';
-import { updates } from '../../cli/actions/updates.js';
 import { runCli } from '../../cli/index.js';
 
 

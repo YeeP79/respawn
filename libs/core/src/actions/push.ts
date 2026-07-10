@@ -7,19 +7,12 @@ import {
   imageTagExists,
   resolveBaseImageDigest,
 } from '@respawn/docker-utils';
-import type {
-  ActionResult,
-  DiscoveredService,
-  Environment,
-} from '@respawn/core';
-import {
-  collectImageInputs,
-  computeImageTag,
-  parseBaseImage,
-} from '@respawn/core';
-import { runCdk } from '@respawn/core';
-import { logger } from '@respawn/core';
 import * as fs from 'node:fs';
+import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import { collectImageInputs, computeImageTag, parseBaseImage } from '../utils/image-hash.js';
+import { runCdk } from '../utils/cdk-runner.js';
+import { logger } from '../utils/logger.js';
+import { sharedStackId, ecrRepositoryName } from '../naming.js';
 
 export interface PushContext {
   service: DiscoveredService;
@@ -79,7 +72,7 @@ export async function resolveImage(
     baseDigest,
   );
   const tag = computeImageTag(inputs);
-  const repository = `respawn/${ctx.service.name}`;
+  const repository = ecrRepositoryName(ctx.service.name);
 
   const alreadyPushed = await imageTagExists({
     repository,
@@ -123,7 +116,7 @@ export async function buildAndPush(
   logger.info('Deploying shared infrastructure (VPC, ECR)...');
   const shared = await runCdk({
     command: 'deploy',
-    stacks: [`RespawnShared-${ctx.environment}`],
+    stacks: [sharedStackId(ctx.environment)],
     context: {
       environment: ctx.environment,
       services: ctx.service.name,

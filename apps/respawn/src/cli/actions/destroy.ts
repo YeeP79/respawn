@@ -1,79 +1,30 @@
 import * as p from '@clack/prompts';
-import type { ActionResult, DiscoveredService, Environment } from '@respawn/core';
-import { runCdk } from '@respawn/core';
-import { logger } from '@respawn/core';
+import type { ActionResult, DestroyContext } from '@respawn/core';
+import { destroy as coreDestroy } from '@respawn/core';
 
-export interface DestroyContext {
-  service: DiscoveredService;
-  environment: Environment;
-  workspaceRoot: string;
-  verbose?: boolean;
-  profile?: string;
-  force?: boolean;
-}
+export type { DestroyContext };
 
+/**
+ * CLI front-end for the destroy action: a production teardown gets a typed
+ * confirmation here, then the headless core (which never prompts) runs it.
+ */
 export async function destroy(ctx: DestroyContext): Promise<ActionResult> {
-  const start = Date.now();
-  const { service, environment, workspaceRoot } = ctx;
-
-  try {
-    // Extra confirmation for production
-    if (environment === 'prod' && !ctx.force) {
-      const confirmation = await p.text({
-        message: `Type "${service.name}" to confirm PRODUCTION destroy:`,
-        validate: (value) => {
-          if (value !== service.name) {
-            return `You must type "${service.name}" to confirm.`;
-          }
-          return undefined;
-        },
-      });
-
-      if (p.isCancel(confirmation)) {
-        return {
-          success: false,
-          serviceName: service.name,
-          action: 'destroy',
-          message: 'Cancelled by user',
-          duration: Date.now() - start,
-        };
-      }
-    }
-
-    logger.info(`Destroying ${service.name} in ${environment}...`);
-
-    const cdkResult = await runCdk({
-      command: 'destroy',
-      stacks: [`Respawn-${environment}-${service.name}`, `RespawnShared-${environment}`],
-      context: {
-        environment,
-        services: service.name,
-        workspaceRoot,
-      },
-      workspaceRoot,
-      profile: ctx.profile,
-      verbose: ctx.verbose,
-      force: true, // CDK destroy always needs --force to skip y/n prompt
+  if (ctx.environment === 'prod' && !ctx.force) {
+    const confirmation = await p.text({
+      message: `Type "${ctx.service.name}" to confirm PRODUCTION destroy:`,
+      validate: (value) =>
+        value !== ctx.service.name ? `You must type "${ctx.service.name}" to confirm.` : undefined,
     });
-
-    if (cdkResult.exitCode !== 0) {
-      throw new Error('CDK destroy failed');
+    if (p.isCancel(confirmation)) {
+      return {
+        success: false,
+        serviceName: ctx.service.name,
+        action: 'destroy',
+        message: 'Cancelled by user',
+        duration: 0,
+      };
     }
-
-    return {
-      success: true,
-      serviceName: service.name,
-      action: 'destroy',
-      message: `Successfully destroyed ${service.name} in ${environment}`,
-      duration: Date.now() - start,
-    };
-  } catch (err) {
-    return {
-      success: false,
-      serviceName: service.name,
-      action: 'destroy',
-      message: err instanceof Error ? err.message : String(err),
-      duration: Date.now() - start,
-    };
+    return coreDestroy({ ...ctx, force: true });
   }
+  return coreDestroy(ctx);
 }

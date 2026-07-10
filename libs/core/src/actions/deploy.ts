@@ -1,11 +1,9 @@
-import type { ActionResult, DiscoveredService, Environment } from '@respawn/core';
-import {
-  findUnsatisfiedRequirements,
-  formatRequirementError,
-} from '@respawn/core';
-import { runCdk } from '@respawn/core';
-import { logger } from '@respawn/core';
-import { secretExists } from '@respawn/core';
+import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import { findUnsatisfiedRequirements, formatRequirementError } from '../config/preflight.js';
+import { runCdk } from '../utils/cdk-runner.js';
+import { logger } from '../utils/logger.js';
+import { secretExists } from '../utils/secrets-runner.js';
+import { serviceStackId, sharedStackId } from '../naming.js';
 import { buildAndPush, resolveImage } from './push.js';
 import { checkUpdates, recordUpdateState } from './updates.js';
 
@@ -124,7 +122,7 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       logger.info('Deploying infrastructure via CDK...');
       const cdkResult = await runCdk({
         command: 'deploy',
-        stacks: [`RespawnShared-${environment}`, `Respawn-${environment}-${service.name}`],
+        stacks: [sharedStackId(environment), serviceStackId(environment, service.name)],
         context: {
           environment,
           services: service.name,
@@ -174,7 +172,7 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
     logger.info('Deploying infrastructure via CDK...');
     const cdkResult = await runCdk({
       command: 'deploy',
-      stacks: [`Respawn-${environment}-${service.name}`],
+      stacks: [serviceStackId(environment, service.name)],
       context: {
         environment,
         services: service.name,

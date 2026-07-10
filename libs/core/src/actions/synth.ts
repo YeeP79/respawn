@@ -1,6 +1,7 @@
-import type { ActionResult, DiscoveredService, Environment } from '@respawn/core';
-import { runCdk } from '@respawn/core';
-import { logger } from '@respawn/core';
+import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import { runCdk } from '../utils/cdk-runner.js';
+import { logger } from '../utils/logger.js';
+import { serviceStackId, sharedStackId } from '../naming.js';
 
 export interface SynthContext {
   service: DiscoveredService;
@@ -19,7 +20,7 @@ export async function synth(ctx: SynthContext): Promise<ActionResult> {
 
     const cdkResult = await runCdk({
       command: 'synth',
-      stacks: [`RespawnShared-${environment}`, `Respawn-${environment}-${service.name}`],
+      stacks: [sharedStackId(environment), serviceStackId(environment, service.name)],
       context: {
         environment,
         services: service.name,
