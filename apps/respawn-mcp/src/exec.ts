@@ -79,13 +79,19 @@ function ptyWrap(argv: readonly string[]): { command: string; args: string[] } {
  * no amount of quoting or shell metacharacters in it can break out or inject —
  * it only ever becomes an argument to rcon.py.
  */
-export function buildRemoteCommand(rconCommand: string): string {
+export function buildRemoteCommand(rconCommand: string, opts: { raw?: boolean } = {}): string {
   const encoded = Buffer.from(rconCommand, 'utf-8').toString('base64');
+  const rawFlag = opts.raw ? ' --raw' : '';
   return (
     `sh -c 'echo ${RCON_BEGIN}; ` +
-    `python3 /usr/local/bin/rcon.py --command "$(echo ${encoded} | base64 -d)"; ` +
+    `python3 /usr/local/bin/rcon.py${rawFlag} --command "$(echo ${encoded} | base64 -d)"; ` +
     `echo ${RCON_END}$?'`
   );
+}
+
+/** Builds the remote command for `rcon.py --info` — the sidecar's self-description. */
+export function buildRemoteInfo(): string {
+  return `sh -c 'echo ${RCON_BEGIN}; python3 /usr/local/bin/rcon.py --info; echo ${RCON_END}$?'`;
 }
 
 /**
@@ -124,8 +130,14 @@ export function execRcon(
   target: ExecTarget,
   rconCommand: string,
   timeoutMs = 20_000,
+  opts: { raw?: boolean } = {},
 ): Promise<RconResult> {
-  return runExec(target, buildRemoteCommand(rconCommand), timeoutMs);
+  return runExec(target, buildRemoteCommand(rconCommand, opts), timeoutMs);
+}
+
+/** Runs `rcon.py --info` in the sidecar: its protocol, target host:port and service. */
+export function execInfo(target: ExecTarget, timeoutMs = 20_000): Promise<RconResult> {
+  return runExec(target, buildRemoteInfo(), timeoutMs);
 }
 
 /**

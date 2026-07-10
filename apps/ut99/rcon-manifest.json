@@ -20,7 +20,7 @@
     },
     {
       "name": "players",
-      "description": "Connected players (name, score, ping, team) from the GameSpy \\players\\ query. Bots and humans both appear; the query port lists no IPs.",
+      "description": "Human players (name, score, ping, team) from the GameSpy \\players\\ query. Verified live: bots do NOT appear here however many are in the match, and a player drops from the list while dead/respawning, so treat this as a live snapshot of connected humans, not a roster. The query port exposes no IPs.",
       "rcon": "players",
       "row": {
         "match": "^player=(.*?)\\tfrags=(-?\\d+)\\tping=(\\d+)\\tteam=(\\d+)",

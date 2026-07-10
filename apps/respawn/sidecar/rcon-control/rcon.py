@@ -26,6 +26,7 @@ import os
 import socket
 import struct
 import sys
+from collections.abc import Callable
 
 GOLDSRC_PREFIX = b"\xff\xff\xff\xff"
 
@@ -380,18 +381,14 @@ def gamespy_exec(host: str, port: int, password: str, command: str, timeout: flo
 
     Request:  \\<query>\\   e.g. \\info\\
     Reply:    \\k\\v\\...\\queryid\\N.M\\final\\, fragmented across datagrams when
-              long. Prefix a query with `raw:` to get the wire payload verbatim,
-              which is how an unfamiliar reply gets captured before it is parsed.
+              long.
 
-    Returns scalar fields as `key=value` lines and player slots as one tab-joined
-    line each (see _gamespy_normalize) — the query engine matches per line, and a
-    single `\\k\\v\\` blob has no lines to match.
+    Returns the reassembled wire infostring verbatim. The dispatch layer applies
+    _gamespy_normalize afterwards (see NORMALIZERS) unless --raw is set, which keeps
+    fetching and reshaping separate so an unfamiliar reply can be captured before
+    anyone writes a parser for it.
     """
-    query = (command or "info").strip()
-    raw_mode = query.startswith("raw:")
-    if raw_mode:
-        query = query[len("raw:") :].strip()
-    query = query.strip("\\").lower() or "info"
+    query = (command or "info").strip().strip("\\").lower() or "info"
     if query not in GAMESPY_QUERIES:
         raise RconError(
             f"unknown gamespy query {query!r}; expected one of {', '.join(GAMESPY_QUERIES)}"
@@ -412,11 +409,7 @@ def gamespy_exec(host: str, port: int, password: str, command: str, timeout: flo
                 break
         if not packets:
             raise RconError(f"no reply from {host}:{port} within {timeout}s")
-
-        payload = _gamespy_reassemble(packets)
-        if raw_mode:
-            return payload
-        return _gamespy_normalize(payload)
+        return _gamespy_reassemble(packets)
     finally:
         sock.close()
 
@@ -429,6 +422,14 @@ PROTOCOLS = {
     "gamespy": gamespy_exec,
 }
 
+# Post-fetch reshapers, keyed by protocol. A handler returns the transport's reply as
+# text; its normalizer (if any) restructures that into the lines the query engine
+# matches. --raw skips this step for every protocol uniformly, so a new reshaping
+# transport only has to register here — the introspection tooling needs no change.
+NORMALIZERS: dict[str, Callable[[str], str]] = {
+    "gamespy": _gamespy_normalize,
+}
+
 # Query-only protocols whose port takes no credentials. Requiring a password for
 # these would force a pointless secret on a service that has none to give.
 UNAUTHENTICATED_PROTOCOLS = frozenset({"gamespy"})
@@ -438,6 +439,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Execute one rcon command over loopback.")
     parser.add_argument("--command", help="rcon command, e.g. 'status' or 'changelevel de_nuke'")
     parser.add_argument("--info", action="store_true", help="print which server this sidecar fronts")
+    parser.add_argument(
+        "--raw",
+        action="store_true",
+        help="skip protocol normalization; return the transport reply verbatim",
+    )
     parser.add_argument("--protocol", default=os.environ.get("RCON_PROTOCOL", "goldsrc"))
     parser.add_argument("--host", default=os.environ.get("RCON_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("RCON_PORT", "27015")))
@@ -468,7 +474,11 @@ def main() -> int:
         return 1
 
     try:
-        print(handler(args.host, args.port, password, args.command, args.timeout))
+        reply = handler(args.host, args.port, password, args.command, args.timeout)
+        normalize = NORMALIZERS.get(args.protocol)
+        if normalize is not None and not args.raw:
+            reply = normalize(reply)
+        print(reply)
     except RconError as exc:
         # Never echo the password, not even in an error path.
         print(f"rcon failed: {exc}", file=sys.stderr)

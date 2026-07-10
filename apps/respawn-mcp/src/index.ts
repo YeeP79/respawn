@@ -6,7 +6,21 @@ import {
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { discoverRconServers, RCON_CONTAINER_NAME } from './discovery.js';
-import { execPython, execRcon, type ExecTarget, type RconResult } from './exec.js';
+import {
+  execInfo,
+  execPython,
+  execRcon,
+  type ExecTarget,
+  type RconResult,
+} from './exec.js';
+import {
+  clampSample,
+  manifestSummary,
+  parseTransportInfo,
+  summariseSamples,
+  type SamplePoint,
+  type TransportReport,
+} from './introspection.js';
 import {
   CONTAINER_STATS_PROBE,
   explainExit,
@@ -278,6 +292,137 @@ server.registerTool(
     inputSchema: { service: z.string(), command: z.string() },
   },
   async ({ service, command }) => runAndFormat(service, command),
+);
+
+server.registerTool(
+  'capture_raw',
+  {
+    title: 'Capture a raw reply',
+    description:
+      'Run a query and return the transport reply UNPARSED, before any protocol ' +
+      'normalization. This is the tool for authoring or debugging a manifest against ' +
+      'an unfamiliar server: see the real wire format, then write patterns for it. ' +
+      'Works for every protocol; for one whose sidecar reshapes its output (e.g. ' +
+      'UT99 GameSpy), this shows what the reshaping started from.',
+    inputSchema: {
+      service: z.string(),
+      command: z
+        .string()
+        .describe('Query or command to send verbatim, e.g. "players" or "status"'),
+    },
+  },
+  async ({ service, command }) => {
+    const target = await resolveTarget(service);
+    const result = await execRcon(target, command, undefined, { raw: true });
+    if (result.exitCode !== 0) {
+      return textResult(`capture failed on ${service}:\n${result.output || '(no output)'}`, true);
+    }
+    return textResult(result.output || '(empty reply)');
+  },
+);
+
+server.registerTool(
+  'describe_transport',
+  {
+    title: 'Describe a server\'s control transport',
+    description:
+      'What the MCP can do to a server and how: the protocol and port its sidecar ' +
+      'speaks (read live when running), plus the queries, commands and cvars its ' +
+      'manifest declares. The manifest half works when the server is scaled to zero; ' +
+      'the live half needs it running. Start here when a tool is not behaving.',
+    inputSchema: { service: z.string() },
+  },
+  async ({ service }) => {
+    const manifest = manifestSummary(getManifest(service));
+    const report: TransportReport = { service, reachable: false };
+    if (manifest) report.manifest = manifest;
+
+    const target = await findTarget(service);
+    if (!target) {
+      report.note = 'server is not running; showing manifest-declared surface only.';
+    } else {
+      try {
+        const info = await execInfo(target);
+        if (info.exitCode === 0) {
+          report.reachable = true;
+          report.live = parseTransportInfo(info.output);
+        } else {
+          report.note = `sidecar --info failed:\n${info.output || '(no output)'}`;
+        }
+      } catch (err) {
+        report.note = `could not reach the sidecar: ${(err as Error).message}`;
+      }
+    }
+    if (!manifest && !report.reachable) {
+      return textResult(
+        `No manifest for "${service}" and it is not running. ` +
+          `Servers with a manifest: ${manifestedServices().join(', ') || '(none)'}.`,
+        true,
+      );
+    }
+    return textResult(JSON.stringify(report, null, 2));
+  },
+);
+
+server.registerTool(
+  'sample',
+  {
+    title: 'Sample a query over time',
+    description:
+      'Run a declared query repeatedly and report how one field changes — the ' +
+      'game-state counterpart to server_metrics. Use it to watch player count settle, ' +
+      'ping drift, or a map rotate. Each sample is one ECS Exec session, so runs are ' +
+      'capped and spaced; this call blocks for roughly count x interval seconds.',
+    inputSchema: {
+      service: z.string(),
+      query: z.string().describe('Declared query name, e.g. "server_info"'),
+      field: z
+        .string()
+        .describe('Field to track from the query result, e.g. "playerCount", or "rows" for its row count'),
+      count: z.number().int().optional().describe('Samples to take (1-10, default 5)'),
+      intervalSeconds: z.number().optional().describe('Seconds between samples (3-60, default 10)'),
+    },
+  },
+  async ({ service, query, field, count, intervalSeconds }) => {
+    const manifest = getManifest(service);
+    const def = manifest?.queries.find((q) => q.name === query);
+    if (!def) {
+      const names = manifest?.queries.map((q) => q.name).join(', ') || '(none)';
+      return textResult(`No query "${query}" for ${service}. Available: ${names}.`, true);
+    }
+    const bounds = clampSample(count ?? 5, intervalSeconds ?? 10);
+    const target = await resolveTarget(service);
+
+    const points: SamplePoint[] = [];
+    for (let n = 1; n <= bounds.count; n++) {
+      if (n > 1) await new Promise((r) => setTimeout(r, bounds.intervalSeconds * 1000));
+      let value: string | null = null;
+      try {
+        const result = await execRcon(target, def.rcon);
+        if (result.exitCode === 0) {
+          const parsed = runQuery(def, result.output);
+          const raw = field === 'rows' ? parsed.rows?.length : parsed[field];
+          if (raw !== undefined && raw !== null) value = String(raw);
+        }
+      } catch {
+        value = null;
+      }
+      points.push({ n, value });
+    }
+
+    const { distinct, misses } = summariseSamples(points);
+    const report = {
+      service,
+      query,
+      field,
+      count: bounds.count,
+      intervalSeconds: bounds.intervalSeconds,
+      distinct,
+      misses,
+      points,
+    };
+    return textResult(JSON.stringify(report, null, 2));
+  },
 );
 
 server.registerTool(
