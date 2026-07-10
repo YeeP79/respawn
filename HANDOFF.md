@@ -78,6 +78,10 @@ it every exec-backed tool fails with the EOF above.
 | `respawn-dev-doom2` | deployed | **enabled** | Zandronum, freedoom baked in. The only MCP-controllable server. Still carries `memoryLimitMiB: 192`; the branch lowers it to 128, so it needs a redeploy to converge. |
 | `respawn-dev-cs16` | **never built** | **disabled** | `.env` says `ENABLE_RCON_CONTROL=true`, but the deployed service predates it. Needs one deploy before the MCP can touch it. |
 
+`cs16` and `tfc` both have a pending image rebuild: their Dockerfiles now drop the empty
+`/temp/mods` and `/temp/config` that made the upstream `jives/hlds` entrypoint log an rsync
+error on every boot. The image tag is a content hash, so the next deploy of either rebuilds.
+
 Secrets in AWS (all created): rcon for cs16, css, tfc, l4d2, tf2, gmod, cs2, doom2;
 `respawn/rust/rcon-password`, `respawn/ut99/admin-pwd`, `respawn/valheim/server-pass`.
 
@@ -100,8 +104,12 @@ Secrets in AWS (all created): rcon for cs16, css, tfc, l4d2, tf2, gmod, cs2, doo
 6. **Known cosmetic bug**: `CONTAINER_COMMAND` is split on whitespace without respecting
    quotes, so `+sv_hostname "Respawn Doom 2"` fractures and the hostname arrives as
    `"Respawn`. Fix = quote-aware parse in `loader.ts` `parseCommand`.
-7. **doom2 peaked at 100% CPU** on its 0.25 vCPU (`server_metrics`). Possibly fine for
-   zandronum, possibly worth `CPU=512`. Unexamined.
+7. **doom2's CPU is fine — an earlier "peaked at 100%" claim here was wrong.** That peak
+   was the observer: `CPUUtilization` is a *task* metric, so the CPU burned by ECS Exec
+   sessions lands in it, and every 100% minute coincides with back-to-back `container_stats`
+   and `rcon` probes. At 1-minute resolution over a task with nobody exec'ing into it, the
+   game tops out near 39% of 0.25 vCPU. `CPU=512` is not indicated. Re-measure under real
+   player load with `server_metrics resolution=1m` before changing anything.
 8. **The game ignores SIGTERM** — every clean stop exits 137 via SIGKILL. Harmless today
    (and `explainExit` knows), but a graceful-shutdown shim would be tidier.
 
@@ -117,6 +125,11 @@ Secrets in AWS (all created): rcon for cs16, css, tfc, l4d2, tf2, gmod, cs2, doo
 - **Exit code 137 is not OOM here.** Zandronum and GoldSrc ignore SIGTERM, so ECS escalates
   to SIGKILL and every normal scale-to-zero exits 137. Only suspect OOM when `stopCode`
   shows ECS did not initiate the stop.
+- **`CPUUtilization` measures the observer too.** It is a *task* metric, so an ECS Exec
+  session's own CPU — `container_stats`, every `rcon` call — is counted as the game's. Read
+  it at `resolution=1m` and check whether the peaks line up with your own probes before
+  concluding the server is CPU-starved. An avg/peak summary hides this completely; that is
+  why `server_metrics` returns the timeline.
 - **ECS Exec needs a TTY.** See above. Without one, fast commands appear to work and slow
   ones vanish — the worst possible failure mode.
 - **Rapid back-to-back exec sessions** can drop the SSM control channel
