@@ -1,9 +1,48 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { parse as parseDotenv } from 'dotenv';
-import type { Environment, DiscoveredService } from '../config/types.js';
+import type { Environment, DiscoveredService, GameServerConfig } from '../config/types.js';
 import { loadConfig } from '../config/loader.js';
 import { logger } from './logger.js';
+
+/**
+ * Loads one service directory, applying the same guards discovery has always used:
+ * an absent `.env` skips silently, and a Dockerfile-less dir needs `IMAGE_URI`.
+ * `baseEnvPath`, when given, is a project `.env` the dir's own env layers over — the
+ * variant overlay. Returns undefined (never throws) so one bad service cannot take
+ * down discovery of the rest.
+ */
+function loadService(
+  serviceDir: string,
+  environment: Environment,
+  baseEnvPath: string | undefined,
+  label: string,
+): GameServerConfig | undefined {
+  const hasDockerfile = fs.existsSync(path.join(serviceDir, 'Dockerfile'));
+  const envFilePath = path.join(serviceDir, '.env');
+
+  if (!fs.existsSync(envFilePath)) {
+    logger.debug(`Skipping ${label}: missing .env`);
+    return undefined;
+  }
+  if (!hasDockerfile) {
+    const env = parseDotenv(Buffer.from(fs.readFileSync(envFilePath, 'utf-8')));
+    if (!env['IMAGE_URI']) {
+      logger.debug(`Skipping ${label}: no Dockerfile and no IMAGE_URI`);
+      return undefined;
+    }
+  }
+  try {
+    const config = loadConfig(serviceDir, environment, baseEnvPath);
+    logger.debug(`Discovered service: ${config.serviceName}`);
+    return config;
+  } catch (err) {
+    logger.warn(
+      `Failed to load config for ${label}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return undefined;
+  }
+}
 
 export function discoverServices(
   workspaceRoot: string,
@@ -25,34 +64,29 @@ export function discoverServices(
     // Skip the respawn app itself
     if (entry.name === 'respawn') continue;
 
-    const servicePath = path.join(appsDir, entry.name);
-    const hasDockerfile = fs.existsSync(path.join(servicePath, 'Dockerfile'));
-    const hasEnvFile = fs.existsSync(path.join(servicePath, '.env'));
+    const dir = path.join(appsDir, entry.name);
+    const variantsDir = path.join(dir, 'variants');
 
-    if (!hasEnvFile) {
-      logger.debug(`Skipping ${entry.name}: missing .env`);
+    // A project with a `variants/` dir is represented ONLY by its variants — each is a
+    // service in its own right, layered over the project's shared `.env`. Its identity
+    // is author-controlled via SERVICE_NAME (so `name` == config.serviceName keeps the
+    // dir-name and serviceName identities in sync for a variant).
+    if (fs.existsSync(variantsDir) && fs.statSync(variantsDir).isDirectory()) {
+      const projectEnv = path.join(dir, '.env');
+      const baseEnvPath = fs.existsSync(projectEnv) ? projectEnv : undefined;
+      for (const variant of fs.readdirSync(variantsDir, { withFileTypes: true })) {
+        if (!variant.isDirectory()) continue;
+        const variantDir = path.join(variantsDir, variant.name);
+        const label = `${entry.name}/${variant.name}`;
+        const config = loadService(variantDir, environment, baseEnvPath, label);
+        if (config) services.push({ name: config.serviceName, path: variantDir, config });
+      }
       continue;
     }
 
-    if (!hasDockerfile) {
-      // Allow services with IMAGE_URI set (no Dockerfile needed)
-      const envContent = fs.readFileSync(path.join(servicePath, '.env'), 'utf-8');
-      const env = parseDotenv(Buffer.from(envContent));
-      if (!env['IMAGE_URI']) {
-        logger.debug(`Skipping ${entry.name}: no Dockerfile and no IMAGE_URI`);
-        continue;
-      }
-    }
-
-    try {
-      const config = loadConfig(servicePath, environment);
-      services.push({ name: entry.name, path: servicePath, config });
-      logger.debug(`Discovered service: ${entry.name}`);
-    } catch (err) {
-      logger.warn(
-        `Failed to load config for ${entry.name}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    // Flat project: today's behavior, keyed on the directory name.
+    const config = loadService(dir, environment, undefined, entry.name);
+    if (config) services.push({ name: entry.name, path: dir, config });
   }
 
   return services;

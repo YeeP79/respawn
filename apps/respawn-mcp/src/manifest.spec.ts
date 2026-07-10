@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { parseManifest } from './manifest.js';
 import { parseMapList } from './capabilities.js';
+import { MOD_DATA_SCHEMAS } from './mod-data.js';
 
 describe('parseManifest', () => {
   it('defaults service to the directory name', () => {
@@ -86,6 +88,54 @@ describe('parseManifest', () => {
   it('rejects an unknown key on a cvar and on the manifest root', () => {
     expect(() => parseManifest({ cvars: [{ name: 'g', vals: ['1'] }] }, 'x')).toThrow();
     expect(() => parseManifest({ notez: 'typo' }, 'x')).toThrow();
+  });
+});
+
+describe('parseManifest modData (generic)', () => {
+  it('passes arbitrary modData through when no schema is supplied', () => {
+    const m = parseManifest({ modData: { anything: [1, 'two'] } }, 'x');
+    expect(m.modData).toEqual({ anything: [1, 'two'] });
+  });
+
+  it('validates manifest-level modData against a supplied schema', () => {
+    const schema = z.array(z.object({ name: z.string() }).strict());
+    expect(parseManifest({ modData: [{ name: 'ok' }] }, 'x', schema).modData).toEqual([
+      { name: 'ok' },
+    ]);
+    expect(() => parseManifest({ modData: [{ name: 1 }] }, 'x', schema)).toThrow();
+    expect(() => parseManifest({ modData: [{ name: 'ok', extra: true }] }, 'x', schema)).toThrow();
+  });
+
+  it('validates per-command and per-query modData against the same schema', () => {
+    const schema = z.object({ tier: z.number() }).strict();
+    expect(() =>
+      parseManifest(
+        { commands: [{ name: 'c', description: 'd', rcon: 'r', modData: { tier: 'high' } }] },
+        'x',
+        schema,
+      ),
+    ).toThrow();
+    expect(() =>
+      parseManifest(
+        { queries: [{ name: 'q', description: 'd', rcon: 'r', modData: { tier: 2 } }] },
+        'x',
+        schema,
+      ),
+    ).not.toThrow();
+  });
+
+  it('validates the ut99 shipped-mod catalogue with its registered schema', () => {
+    const schema = MOD_DATA_SCHEMAS['ut99'];
+    const good = [{ name: 'MonsterHunt', package: 'MonsterHunt', kind: 'gametype', control: 'admin' }];
+    expect(parseManifest({ modData: good }, 'ut99', schema).modData).toEqual(good);
+    // A control style outside the enum is a build-time failure, not a silent drop.
+    expect(() =>
+      parseManifest(
+        { modData: [{ name: 'X', package: 'P', kind: 'mutator', control: 'sometimes' }] },
+        'ut99',
+        schema,
+      ),
+    ).toThrow();
   });
 });
 

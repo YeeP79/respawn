@@ -175,17 +175,33 @@ export interface RedisConfig {
  * Enabled by `ENABLE_RCON_CONTROL`; needs a `SECRET_REFS` entry naming the rcon
  * password so it can be injected without appearing in the task definition.
  */
-/** Wire protocol the rcon-control sidecar speaks to the game. */
-export type RconProtocol = 'goldsrc' | 'source' | 'q3' | 'zandronum' | 'gamespy';
+/**
+ * Wire protocol the rcon-control sidecar speaks to the game. `gamespy` is
+ * read-only (queries); `uweb` is the authenticated Unreal Engine 1 web admin
+ * console, a write path with no read counterpart — hence the split below.
+ */
+export type RconProtocol = 'goldsrc' | 'source' | 'q3' | 'zandronum' | 'gamespy' | 'uweb';
 
 export interface RconControlConfig {
   enabled: boolean;
-  /** Wire protocol the rcon-control sidecar speaks to the game. */
+  /** Wire protocol the rcon-control sidecar speaks to the game. Used for reads. */
   protocol: RconProtocol;
   /** Container env var (from SECRET_REFS) holding the rcon password. */
   passwordSecretVar: string;
   /** Port the game answers rcon on. Defaults to the container port. */
   port?: number;
+  /**
+   * Optional second transport for state-changing commands, when the read protocol
+   * cannot write (UT99: reads on `gamespy`, writes on `uweb`). Left undefined, writes
+   * use `protocol` — every single-rcon game (goldsrc/source/...) is unaffected.
+   */
+  writeProtocol?: RconProtocol;
+  /** Port the write transport answers on. Defaults to `port`. */
+  writePort?: number;
+  /** Container env var (from SECRET_REFS) holding the write transport's password. */
+  writePasswordSecretVar?: string;
+  /** Username for an authenticated write transport (uweb HTTP Basic auth). */
+  writeUser?: string;
 }
 
 export interface AwsConfig {

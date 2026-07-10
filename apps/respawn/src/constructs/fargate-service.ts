@@ -218,6 +218,20 @@ export class GameServerFargateService extends Construct {
           `rcon-control needs a SECRET_REFS entry named ${config.rconControl.passwordSecretVar}.`,
         );
       }
+
+      // Optional write transport: resolve its own secret from the same SECRET_REFS
+      // map. Loader validation guarantees it exists for an authenticated protocol.
+      const { writeProtocol, writePasswordSecretVar } = config.rconControl;
+      let writeSecret: ecs.Secret | undefined;
+      if (writeProtocol && writePasswordSecretVar) {
+        writeSecret = containerSecrets[writePasswordSecretVar];
+        if (!writeSecret) {
+          throw new Error(
+            `rcon-control write transport needs a SECRET_REFS entry named ${writePasswordSecretVar}.`,
+          );
+        }
+      }
+
       new RconControlSidecar(this, 'RconControl', {
         taskDefinition,
         logGroup: logging.logGroup,
@@ -226,6 +240,14 @@ export class GameServerFargateService extends Construct {
         rconPort:
           config.rconControl.port ?? config.networking.containerPort,
         serviceName: config.serviceName,
+        ...(writeProtocol ? { writeProtocol } : {}),
+        ...(config.rconControl.writePort !== undefined
+          ? { writePort: config.rconControl.writePort }
+          : {}),
+        ...(config.rconControl.writeUser !== undefined
+          ? { writeUser: config.rconControl.writeUser }
+          : {}),
+        ...(writeSecret ? { writeSecret } : {}),
       });
 
       // ECS Exec tunnels through SSM Messages; the task role needs these.

@@ -10,7 +10,10 @@
       "!{projectRoot}/eslint.config.mjs"
     ],
     "sharedGlobals": [],
-    "gameManifests": ["{workspaceRoot}/apps/*/rcon-manifest.json"]
+    "gameManifests": [
+      "{workspaceRoot}/apps/*/rcon-manifest.json",
+      "{workspaceRoot}/apps/*/variants/*/rcon-manifest.json"
+    ]
   },
   "targetDefaults": {
     "build": {

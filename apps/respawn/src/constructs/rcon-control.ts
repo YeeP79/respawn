@@ -15,6 +15,18 @@ export interface RconControlSidecarProps {
   rconPort: number;
   /** Service name, for log lines and `--info`. */
   serviceName: string;
+  /**
+   * Optional write transport for a game whose read protocol cannot write (UT99:
+   * reads on `gamespy`, writes on the authenticated `uweb` admin console). When set,
+   * state-changing commands (`--write`) use it instead of `protocol`.
+   */
+  writeProtocol?: RconProtocol;
+  /** Port the write transport answers on (loopback). */
+  writePort?: number;
+  /** Username for an authenticated write transport (uweb HTTP Basic auth). */
+  writeUser?: string;
+  /** Secret injected as RCON_WRITE_PASSWORD for an authenticated write transport. */
+  writeSecret?: ecs.Secret;
 }
 
 /**
@@ -55,8 +67,22 @@ export class RconControlSidecar extends Construct {
         RCON_PROTOCOL: props.protocol,
         RCON_HOST: '127.0.0.1',
         RCON_PORT: String(props.rconPort),
+        // The write transport (if any) rides on its own RCON_WRITE_* vars over the same
+        // loopback host, so writes never leave the task. Absent → rcon.py --write falls
+        // through to the read protocol.
+        ...(props.writeProtocol
+          ? {
+              RCON_WRITE_PROTOCOL: props.writeProtocol,
+              RCON_WRITE_HOST: '127.0.0.1',
+              ...(props.writePort ? { RCON_WRITE_PORT: String(props.writePort) } : {}),
+              ...(props.writeUser ? { RCON_WRITE_USER: props.writeUser } : {}),
+            }
+          : {}),
       },
-      secrets: { RCON_PASSWORD: props.rconSecret },
+      secrets: {
+        RCON_PASSWORD: props.rconSecret,
+        ...(props.writeSecret ? { RCON_WRITE_PASSWORD: props.writeSecret } : {}),
+      },
       logging: ecs.LogDrivers.awsLogs({
         logGroup: props.logGroup,
         streamPrefix: 'rcon-control',

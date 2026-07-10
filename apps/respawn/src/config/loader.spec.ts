@@ -645,6 +645,96 @@ describe('loadConfig', () => {
       ].join('\n'));
       expect(() => loadConfig(dir, 'dev')).not.toThrow();
     });
+
+    it('parses an optional write transport (UT99: gamespy read + uweb write)', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-write');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin,UT_WEBADMINPWD=sm:respawn/x/web',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PORT=7778',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+        'RCON_WRITE_PROTOCOL=uweb',
+        'RCON_WRITE_PORT=5580',
+        'RCON_WRITE_PASSWORD_VAR=UT_WEBADMINPWD',
+        'RCON_WRITE_USER=admin',
+      ].join('\n'));
+      expect(loadConfig(dir, 'dev').rconControl).toMatchObject({
+        protocol: 'gamespy',
+        writeProtocol: 'uweb',
+        writePort: 5580,
+        writePasswordSecretVar: 'UT_WEBADMINPWD',
+        writeUser: 'admin',
+      });
+    });
+
+    it('leaves the write transport undefined when not configured', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-nowrite');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=source',
+      ].join('\n'));
+      expect(loadConfig(dir, 'dev').rconControl.writeProtocol).toBeUndefined();
+    });
+
+    it('rejects an unknown write protocol', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-write-badproto');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_WRITE_PROTOCOL=htttp',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid RCON_WRITE_PROTOCOL/);
+    });
+
+    it('rejects an authenticated write transport without its secret', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-write-nosecret');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+        'RCON_WRITE_PROTOCOL=uweb',
+        'RCON_WRITE_PASSWORD_VAR=UT_WEBADMINPWD',
+        'RCON_WRITE_USER=admin',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/needs its password in SECRET_REFS/);
+    });
+
+    it('rejects an authenticated write transport without a username', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-write-nouser');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin,UT_WEBADMINPWD=sm:respawn/x/web',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+        'RCON_WRITE_PROTOCOL=uweb',
+        'RCON_WRITE_PASSWORD_VAR=UT_WEBADMINPWD',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/needs a username/);
+    });
+
+    it('rejects an out-of-range write port', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-write-badport');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin,UT_WEBADMINPWD=sm:respawn/x/web',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+        'RCON_WRITE_PROTOCOL=uweb',
+        'RCON_WRITE_PORT=70000',
+        'RCON_WRITE_PASSWORD_VAR=UT_WEBADMINPWD',
+        'RCON_WRITE_USER=admin',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Invalid RCON_WRITE_PORT/);
+    });
   });
 
   describe('plaintext secret rejection', () => {
@@ -711,6 +801,55 @@ describe('loadConfig', () => {
           'GAME_ENV_ADMIN_ID=123\nSECRET_REFS=ADMIN_ID=sm:respawn/dupe/admin',
         ),
       ).toThrow(/set by both/);
+    });
+  });
+
+  describe('base + overlay env merge (variants)', () => {
+    it('layers the variant .env over a base .env, overlay winning', () => {
+      const base = path.join(FIXTURES_DIR, 'base');
+      writeEnvFile(base, 'CPU=512\nMEMORY=1024\nPROTOCOL=UDP');
+      const variant = path.join(FIXTURES_DIR, 'base', 'variants', 'modded');
+      writeEnvFile(variant, 'SERVICE_NAME=game\nMEMORY=2048\nIMAGE_URI=org/x:latest');
+
+      const config = loadConfig(variant, 'dev', path.join(base, '.env'));
+
+      expect(config.serviceName).toBe('game'); // from overlay
+      expect(config.container.cpu).toBe(512); // base-only survives
+      expect(config.container.memory).toBe(2048); // overlay overrides base
+      expect(config.networking.protocol).toBe('UDP'); // base-only survives
+      expect(config.image.imageUri).toBe('org/x:latest'); // overlay-only
+    });
+
+    it('defaults serviceName from the variant dir when neither file sets it', () => {
+      const base = path.join(FIXTURES_DIR, 'base');
+      writeEnvFile(base, 'CPU=512');
+      const variant = path.join(FIXTURES_DIR, 'base', 'variants', 'vanilla');
+      writeEnvFile(variant, 'IMAGE_URI=org/x:latest');
+
+      const config = loadConfig(variant, 'dev', path.join(base, '.env'));
+
+      expect(config.serviceName).toBe('vanilla'); // basename of the variant dir
+      expect(config.container.cpu).toBe(512);
+    });
+
+    it('behaves exactly as today when no baseEnvPath is given', () => {
+      const dir = path.join(FIXTURES_DIR, 'flat');
+      writeEnvFile(dir, 'SERVICE_NAME=flat\nCPU=256\nMEMORY=512');
+
+      const config = loadConfig(dir, 'dev');
+
+      expect(config.serviceName).toBe('flat');
+      expect(config.container.cpu).toBe(256);
+    });
+
+    it('ignores a missing base file rather than throwing', () => {
+      const dir = path.join(FIXTURES_DIR, 'novbase');
+      writeEnvFile(dir, 'SERVICE_NAME=nb\nCPU=256');
+
+      const config = loadConfig(dir, 'dev', path.join(FIXTURES_DIR, 'does-not-exist', '.env'));
+
+      expect(config.serviceName).toBe('nb');
+      expect(config.container.cpu).toBe(256);
     });
   });
 });

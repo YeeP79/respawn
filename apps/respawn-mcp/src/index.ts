@@ -99,9 +99,9 @@ function textResult(text: string, isError = false) {
 }
 
 /** Runs a command and formats the reply, turning a non-zero rcon exit into an error. */
-async function runAndFormat(service: string, command: string) {
+async function runAndFormat(service: string, command: string, opts: { write?: boolean } = {}) {
   const target = await resolveTarget(service);
-  const result: RconResult = await execRcon(target, command);
+  const result: RconResult = await execRcon(target, command, undefined, opts);
   if (result.exitCode !== 0) {
     return textResult(
       `rcon failed (exit ${result.exitCode}) on ${service}:\n${result.output || '(no output)'}`,
@@ -227,7 +227,9 @@ server.registerTool(
     } catch (err) {
       return textResult((err as Error).message, true);
     }
-    return runAndFormat(service, rcon);
+    // Commands change state → the write transport (RCON_WRITE_*), which for UT99 is
+    // the authenticated uweb admin console rather than the read-only gamespy port.
+    return runAndFormat(service, rcon, { write: true });
   },
 );
 
@@ -279,7 +281,7 @@ server.registerTool(
       value: z.string().describe('New value'),
     },
   },
-  async ({ service, cvar, value }) => runAndFormat(service, `${cvar} "${value}"`),
+  async ({ service, cvar, value }) => runAndFormat(service, `${cvar} "${value}"`, { write: true }),
 );
 
 server.registerTool(
@@ -288,10 +290,19 @@ server.registerTool(
     title: 'Raw rcon command',
     description:
       'Run an arbitrary rcon command. Escape hatch for anything the declared ' +
-      'commands do not cover; passed to the game verbatim.',
-    inputSchema: { service: z.string(), command: z.string() },
+      'commands do not cover; passed to the game verbatim. Defaults to the write ' +
+      'transport (state-changing); set write=false to force the read transport, which ' +
+      'only matters for a game with a separate read/write path (UT99: gamespy vs uweb).',
+    inputSchema: {
+      service: z.string(),
+      command: z.string(),
+      write: z
+        .boolean()
+        .optional()
+        .describe('Use the write transport. Default true; false forces the read path.'),
+    },
   },
-  async ({ service, command }) => runAndFormat(service, command),
+  async ({ service, command, write }) => runAndFormat(service, command, { write: write ?? true }),
 );
 
 server.registerTool(

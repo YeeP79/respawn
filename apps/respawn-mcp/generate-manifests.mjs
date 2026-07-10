@@ -1,32 +1,68 @@
-// Build step: read every apps/<name>/rcon-manifest.json, validate it, and emit a
-// single bundled src/manifests.generated.ts. Bundling at build (not reading the
-// repo at runtime) is what lets the MCP run from anywhere while a mod-command
-// edit needs only an MCP rebuild — never a game redeploy.
+// Build step: read every game manifest, validate it, and emit a single bundled
+// src/manifests.generated.ts. Bundling at build (not reading the repo at runtime) is
+// what lets the MCP run from anywhere while a mod-command edit needs only an MCP
+// rebuild — never a game redeploy.
+//
+// A manifest lives at apps/<name>/rcon-manifest.json, OR — for a project that ships
+// variants — at apps/<name>/variants/<v>/rcon-manifest.json, one per variant. A
+// variant is keyed by its SERVICE_NAME (from its .env) so the bundle key matches the
+// deployed service the MCP will control.
 //
 // A malformed manifest fails the build here, matching the loader's "fail fast on
 // bad config" rule rather than shipping something the LLM would misuse.
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseManifest } from './src/manifest.ts';
+import { MOD_DATA_SCHEMAS } from './src/mod-data.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appsDir = join(here, '..');
 const selfName = 'respawn-mcp';
 
-const manifests = {};
+/**
+ * A variant's service name comes from its own .env SERVICE_NAME, else <project>-<variant>.
+ * Only that one key is needed, so it's read with a small regex rather than pulling
+ * dotenv into this build tool (respawn-mcp has no dotenv dependency).
+ */
+function variantServiceName(projectName, variantName, variantDir) {
+  const envFile = join(variantDir, '.env');
+  if (existsSync(envFile)) {
+    const match = /^\s*SERVICE_NAME\s*=\s*(.+?)\s*$/m.exec(readFileSync(envFile, 'utf-8'));
+    if (match) return match[1].replace(/^["']|["']$/g, '');
+  }
+  return `${projectName}-${variantName}`;
+}
+
+// Collect { serviceName, file } for every manifest, descending into variants/.
+const targets = [];
 for (const entry of readdirSync(appsDir, { withFileTypes: true })) {
   if (!entry.isDirectory() || entry.name === selfName || entry.name === 'respawn') {
     continue;
   }
+  const variantsDir = join(appsDir, entry.name, 'variants');
+  if (existsSync(variantsDir) && statSync(variantsDir).isDirectory()) {
+    for (const variant of readdirSync(variantsDir, { withFileTypes: true })) {
+      if (!variant.isDirectory()) continue;
+      const variantDir = join(variantsDir, variant.name);
+      const file = join(variantDir, 'rcon-manifest.json');
+      if (!existsSync(file)) continue;
+      targets.push({ serviceName: variantServiceName(entry.name, variant.name, variantDir), file });
+    }
+    continue;
+  }
   const file = join(appsDir, entry.name, 'rcon-manifest.json');
   if (!existsSync(file)) continue;
+  targets.push({ serviceName: entry.name, file });
+}
 
+const manifests = {};
+for (const { serviceName, file } of targets) {
   try {
     const raw = JSON.parse(readFileSync(file, 'utf-8'));
-    manifests[entry.name] = parseManifest(raw, entry.name);
+    manifests[serviceName] = parseManifest(raw, serviceName, MOD_DATA_SCHEMAS[serviceName]);
   } catch (err) {
-    console.error(`Invalid rcon-manifest.json for ${entry.name}:\n${err}`);
+    console.error(`Invalid rcon-manifest.json for ${serviceName} (${file}):\n${err}`);
     process.exit(1);
   }
 }

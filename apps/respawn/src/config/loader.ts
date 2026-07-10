@@ -74,20 +74,25 @@ function parseCheckMethod(
   return undefined;
 }
 
-const RCON_PROTOCOLS = ['goldsrc', 'source', 'q3', 'zandronum', 'gamespy'] as const;
+const RCON_PROTOCOLS = ['goldsrc', 'source', 'q3', 'zandronum', 'gamespy', 'uweb'] as const;
+
+// Protocols that carry no credentials — a password requirement makes no sense for them.
+// Kept in sync with rcon.py's UNAUTHENTICATED_PROTOCOLS; the write-transport validation
+// below uses it to decide when a password secret is mandatory.
+const UNAUTHENTICATED_PROTOCOLS: readonly RconProtocol[] = ['gamespy'];
 
 /**
  * @throws On an unrecognised protocol. Returning undefined would fall through to the
  *   `goldsrc` default, so a typo would silently point the sidecar at the wrong wire
  *   protocol and every rcon call would time out for no visible reason.
  */
-function parseRconProtocol(value: string | undefined): RconProtocol | undefined {
+function parseRconProtocol(value: string | undefined, envName = 'RCON_PROTOCOL'): RconProtocol | undefined {
   if (value === undefined || value === '') return undefined;
   const lower = value.toLowerCase();
   const match = RCON_PROTOCOLS.find((p) => p === lower);
   if (!match) {
     throw new Error(
-      `Invalid RCON_PROTOCOL: ${value}. Expected one of ${RCON_PROTOCOLS.join(', ')}.`,
+      `Invalid ${envName}: ${value}. Expected one of ${RCON_PROTOCOLS.join(', ')}.`,
     );
   }
   return match;
@@ -450,6 +455,34 @@ function validate(config: GameServerConfig): void {
     if (rp !== undefined && (rp < 1 || rp > 65535)) {
       throw new Error(`Invalid RCON_PORT: ${rp}. Must be 1-65535.`);
     }
+
+    const { writeProtocol, writePort, writePasswordSecretVar, writeUser } = config.rconControl;
+    if (writeProtocol !== undefined) {
+      if (writePort !== undefined && (writePort < 1 || writePort > 65535)) {
+        throw new Error(`Invalid RCON_WRITE_PORT: ${writePort}. Must be 1-65535.`);
+      }
+      // An authenticated write transport (uweb) needs both a credential and a user.
+      // Like the primary check above, the password must arrive as an ECS secret, not
+      // plaintext; the username is not a secret and rides as a plain sidecar env var.
+      if (!UNAUTHENTICATED_PROTOCOLS.includes(writeProtocol)) {
+        const hasSecret =
+          writePasswordSecretVar !== undefined &&
+          config.secretRefs.some((r) => r.containerEnvVar === writePasswordSecretVar);
+        if (!hasSecret) {
+          throw new Error(
+            `RCON_WRITE_PROTOCOL=${writeProtocol} needs its password in SECRET_REFS as ` +
+              `"${writePasswordSecretVar ?? '<unset>'}", injected as an ECS secret. Set ` +
+              `RCON_WRITE_PASSWORD_VAR to the SECRET_REFS entry that holds it.`,
+          );
+        }
+        if (!writeUser) {
+          throw new Error(
+            `RCON_WRITE_PROTOCOL=${writeProtocol} is authenticated and needs a username. ` +
+              `Set RCON_WRITE_USER.`,
+          );
+        }
+      }
+    }
   }
 
   const { queryPort, queryTimeoutSeconds } = config.idleShutdown;
@@ -471,17 +504,23 @@ function validate(config: GameServerConfig): void {
   }
 }
 
+/** Reads a `.env` file into a plain object, or {} if it does not exist. */
+function readEnvFile(filePath: string): Record<string, string> {
+  if (!fs.existsSync(filePath)) return {};
+  return parseDotenv(Buffer.from(fs.readFileSync(filePath, 'utf-8')));
+}
+
 export function loadConfig(
   servicePath: string,
   environment: Environment,
+  baseEnvPath?: string,
 ): GameServerConfig {
-  const envFilePath = path.join(servicePath, '.env');
-  let env: Record<string, string> = {};
-
-  if (fs.existsSync(envFilePath)) {
-    const content = fs.readFileSync(envFilePath, 'utf-8');
-    env = parseDotenv(Buffer.from(content));
-  }
+  // A variant layers its own `.env` over a shared project `.env` (baseEnvPath): the
+  // base holds knobs common to every variant, the overlay only the deltas. The
+  // overlay wins on a key collision. `servicePath` stays the variant dir, so
+  // SERVICE_NAME, DOCKERFILE_PATH, SECRET_REFS and GAME_ENV_* all resolve per variant.
+  const base = baseEnvPath ? readEnvFile(baseEnvPath) : {};
+  const env: Record<string, string> = { ...base, ...readEnvFile(path.join(servicePath, '.env')) };
 
   const serviceName =
     env['SERVICE_NAME'] || path.basename(servicePath);
@@ -600,6 +639,10 @@ export function loadConfig(
       passwordSecretVar:
         env['RCON_PASSWORD_VAR'] || DEFAULT_RCON_CONTROL.passwordSecretVar,
       port: parseNumber(env['RCON_PORT']),
+      writeProtocol: parseRconProtocol(env['RCON_WRITE_PROTOCOL'], 'RCON_WRITE_PROTOCOL'),
+      writePort: parseNumber(env['RCON_WRITE_PORT']),
+      writePasswordSecretVar: env['RCON_WRITE_PASSWORD_VAR'] || undefined,
+      writeUser: env['RCON_WRITE_USER'] || undefined,
     },
 
     persistentStorage: {
