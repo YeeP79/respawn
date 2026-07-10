@@ -175,10 +175,13 @@ export interface RedisConfig {
  * Enabled by `ENABLE_RCON_CONTROL`; needs a `SECRET_REFS` entry naming the rcon
  * password so it can be injected without appearing in the task definition.
  */
+/** Wire protocol the rcon-control sidecar speaks to the game. */
+export type RconProtocol = 'goldsrc' | 'source' | 'q3' | 'zandronum' | 'gamespy';
+
 export interface RconControlConfig {
   enabled: boolean;
   /** Wire protocol the rcon-control sidecar speaks to the game. */
-  protocol: 'goldsrc' | 'source' | 'q3' | 'zandronum';
+  protocol: RconProtocol;
   /** Container env var (from SECRET_REFS) holding the rcon password. */
   passwordSecretVar: string;
   /** Port the game answers rcon on. Defaults to the container port. */

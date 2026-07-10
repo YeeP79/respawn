@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send one rcon command to the game container over loopback.
+r"""Send one rcon command to the game container over loopback.
 
 This runs *inside* the ECS task, alongside the game. Containers in a task share a
 network namespace, so the game answers on 127.0.0.1 and the rcon password never
@@ -9,12 +9,14 @@ Routing lives in the caller: one control sidecar fronts exactly one game server,
 and it learns which one from its environment (RCON_PROTOCOL, RCON_PORT). An MCP
 client selects the server by choosing which task to exec into.
 
-Four wire protocols, because the engines differ:
+Five wire protocols, because the engines differ:
   goldsrc    UDP. Challenge, then `rcon <challenge> "<pass>" <cmd>`. The password
              is re-sent with every command (protocol limitation).
   source     TCP, length-prefixed packets. Authenticate once per connection.
   q3         idTech3 (Quake 3 / Quake Live). One connectionless UDP packet.
   zandronum  Stateful, Huffman-coded UDP with salted-MD5 auth (Doom 2 etc.).
+  gamespy    Unreal Engine 1 (UT99) query port. Read-only and unauthenticated —
+             it answers `\info\`/`\players\` and takes no commands at all.
 
 Exit codes: 0 on success, 1 on failure (auth rejected, timeout, bad protocol).
 """
@@ -285,12 +287,114 @@ def zandronum_exec(host: str, port: int, password: str, command: str, timeout: f
         sock.close()
 
 
+# GameSpy v1 queries an Unreal Engine 1 server answers. `status` is the union of
+# basic+info+rules+players and is what the browsers use.
+GAMESPY_QUERIES = ("info", "basic", "rules", "players", "status", "echo")
+
+
+def _gamespy_pairs(payload: str) -> list[tuple[str, str]]:
+    r"""Split a GameSpy infostring `\k\v\k\v\` into ordered key/value pairs.
+
+    Keys repeat (`\status\` sends `gamever` twice), so this is a list, not a dict.
+    A trailing key with no value is dropped rather than paired with the terminator.
+    """
+    parts = payload.split("\\")
+    if parts and parts[0] == "":
+        parts = parts[1:]
+    pairs: list[tuple[str, str]] = []
+    for i in range(0, len(parts) - 1, 2):
+        pairs.append((parts[i], parts[i + 1]))
+    return pairs
+
+
+def _gamespy_reassemble(packets: list[bytes]) -> str:
+    r"""Order multi-packet replies by their `\queryid\N.M` sequence number.
+
+    UDP gives no ordering guarantee and a populated `\players\` reply spans several
+    datagrams, so sort on M rather than on arrival.
+    """
+    numbered: list[tuple[int, str]] = []
+    for index, raw in enumerate(packets):
+        text = raw.decode("latin-1")
+        seq = index
+        for key, value in _gamespy_pairs(text):
+            if key == "queryid" and "." in value:
+                try:
+                    seq = int(value.split(".", 1)[1])
+                except ValueError:
+                    pass
+                break
+        numbered.append((seq, text))
+    numbered.sort(key=lambda item: item[0])
+    return "".join(text for _, text in numbered)
+
+
+def gamespy_exec(host: str, port: int, password: str, command: str, timeout: float) -> str:
+    r"""GameSpy v1 query (Unreal Engine 1: UT99). Read-only, and unauthenticated.
+
+    `password` is accepted to match the dispatch signature and deliberately unused:
+    the query port takes no credentials. That also means this protocol can never
+    back run_command or set_cvar — it only reads. UT99's writes live behind the
+    web admin on a different port.
+
+    Request:  \\<query>\\   e.g. \\info\\
+    Reply:    \\k\\v\\...\\queryid\\N.M\\final\\, fragmented across datagrams when
+              long. Prefix a query with `raw:` to get the wire payload verbatim,
+              which is how an unfamiliar reply gets captured before it is parsed.
+
+    Returns `key=value` lines, one per pair, in wire order — the query engine
+    matches per line, and a single `\\k\\v\\` blob has no lines to match.
+    """
+    query = (command or "info").strip()
+    raw_mode = query.startswith("raw:")
+    if raw_mode:
+        query = query[len("raw:") :].strip()
+    query = query.strip("\\").lower() or "info"
+    if query not in GAMESPY_QUERIES:
+        raise RconError(
+            f"unknown gamespy query {query!r}; expected one of {', '.join(GAMESPY_QUERIES)}"
+        )
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(f"\\{query}\\".encode("latin-1"), (host, port))
+        packets: list[bytes] = []
+        while True:
+            try:
+                data, _ = sock.recvfrom(65535)
+            except socket.timeout:
+                break
+            packets.append(data)
+            if b"\\final\\" in data:
+                break
+        if not packets:
+            raise RconError(f"no reply from {host}:{port} within {timeout}s")
+
+        payload = _gamespy_reassemble(packets)
+        if raw_mode:
+            return payload
+        lines = [
+            f"{key}={value}"
+            for key, value in _gamespy_pairs(payload)
+            if key not in ("queryid", "final")
+        ]
+        return "\n".join(lines)
+    finally:
+        sock.close()
+
+
 PROTOCOLS = {
     "goldsrc": goldsrc_exec,
     "source": source_exec,
     "q3": q3_exec,
     "zandronum": zandronum_exec,
+    "gamespy": gamespy_exec,
 }
+
+# Query-only protocols whose port takes no credentials. Requiring a password for
+# these would force a pointless secret on a service that has none to give.
+UNAUTHENTICATED_PROTOCOLS = frozenset({"gamespy"})
 
 
 def main() -> int:
@@ -314,7 +418,7 @@ def main() -> int:
         return 1
 
     password = os.environ.get("RCON_PASSWORD", "")
-    if not password:
+    if not password and args.protocol not in UNAUTHENTICATED_PROTOCOLS:
         print("error: RCON_PASSWORD is not set in this container", file=sys.stderr)
         return 1
 

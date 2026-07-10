@@ -6,6 +6,7 @@ import type {
   DeployPrompt,
   Environment,
   GameServerConfig,
+  RconProtocol,
   SecretRef,
   UpdateCheck,
 } from './types.js';
@@ -73,15 +74,23 @@ function parseCheckMethod(
   return undefined;
 }
 
-function parseRconProtocol(
-  value: string | undefined,
-): 'goldsrc' | 'source' | 'q3' | 'zandronum' | undefined {
+const RCON_PROTOCOLS = ['goldsrc', 'source', 'q3', 'zandronum', 'gamespy'] as const;
+
+/**
+ * @throws On an unrecognised protocol. Returning undefined would fall through to the
+ *   `goldsrc` default, so a typo would silently point the sidecar at the wrong wire
+ *   protocol and every rcon call would time out for no visible reason.
+ */
+function parseRconProtocol(value: string | undefined): RconProtocol | undefined {
   if (value === undefined || value === '') return undefined;
   const lower = value.toLowerCase();
-  if (lower === 'goldsrc' || lower === 'source' || lower === 'q3' || lower === 'zandronum') {
-    return lower;
+  const match = RCON_PROTOCOLS.find((p) => p === lower);
+  if (!match) {
+    throw new Error(
+      `Invalid RCON_PROTOCOL: ${value}. Expected one of ${RCON_PROTOCOLS.join(', ')}.`,
+    );
   }
-  return undefined;
+  return match;
 }
 
 function parseGameEnvVars(env: Record<string, string>): Record<string, string> {

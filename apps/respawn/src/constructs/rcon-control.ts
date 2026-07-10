@@ -2,14 +2,15 @@ import * as path from 'node:path';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import type { RconProtocol } from '../config/types.js';
 
 export interface RconControlSidecarProps {
   taskDefinition: ecs.FargateTaskDefinition;
   logGroup: logs.ILogGroup;
   /** Container env var name the rcon secret is injected as (usually RCON_PASSWORD). */
   rconSecret: ecs.Secret;
-  /** Wire protocol the game speaks: 'goldsrc' (UDP) or 'source' (TCP). */
-  protocol: 'goldsrc' | 'source' | 'q3' | 'zandronum';
+  /** Wire protocol the game speaks; `gamespy` is query-only (UT99). */
+  protocol: RconProtocol;
   /** Port the game answers rcon on (loopback). */
   rconPort: number;
   /** Service name, for log lines and `--info`. */
