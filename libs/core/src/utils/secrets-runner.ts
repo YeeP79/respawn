@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process';
-import { logger } from './logger.js';
+import { runAws } from '../aws/exec.js';
 
 export interface SetSecretOptions {
   /** Backing store: AWS Secrets Manager ('sm') or SSM Parameter Store ('ssm') */
@@ -12,51 +11,6 @@ export interface SetSecretOptions {
   region?: string;
   /** AWS CLI profile */
   profile?: string;
-}
-
-interface AwsResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-/**
- * Runs the AWS CLI with the given args. The secret value (when provided) is fed
- * via stdin and referenced as `file:///dev/stdin`, so it never appears in argv,
- * the process list (beyond the fd path), or shell history.
- */
-function runAws(
-  args: string[],
-  opts: { profile?: string; region?: string; stdin?: string },
-): Promise<AwsResult> {
-  return new Promise((resolve) => {
-    const finalArgs = [...args];
-    if (opts.region) finalArgs.push('--region', opts.region);
-    if (opts.profile) finalArgs.push('--profile', opts.profile);
-
-    logger.debug(`Running: aws ${finalArgs.join(' ')}`);
-
-    const child = spawn('aws', finalArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d) => (stdout += d.toString()));
-    child.stderr.on('data', (d) => (stderr += d.toString()));
-
-    child.on('close', (code) =>
-      resolve({ exitCode: code ?? 1, stdout, stderr }),
-    );
-    child.on('error', (err) =>
-      resolve({ exitCode: 1, stdout, stderr: err.message }),
-    );
-
-    if (opts.stdin !== undefined) {
-      child.stdin.write(opts.stdin);
-    }
-    child.stdin.end();
-  });
 }
 
 /**

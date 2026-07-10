@@ -10,6 +10,7 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
 import type { SecretRef } from '@respawn/core';
 import type { GameServerConfig } from '@respawn/core';
+import { clusterName, ecsServiceName, execAuditLogGroupName } from '@respawn/core';
 import { GameServerLogging } from './logging.js';
 import { GameServerNetworking } from './networking.js';
 import { GameServerEfsStorage } from './efs-storage.js';
@@ -54,7 +55,7 @@ export class GameServerFargateService extends Construct {
     let execLogGroup: logs.LogGroup | undefined;
     if (rconEnabled) {
       execLogGroup = new logs.LogGroup(this, 'ExecAuditLog', {
-        logGroupName: `/respawn/${config.environment}/${config.serviceName}/exec-audit`,
+        logGroupName: execAuditLogGroupName(config.environment, config.serviceName),
         retention: logs.RetentionDays.ONE_YEAR,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       });
@@ -70,7 +71,7 @@ export class GameServerFargateService extends Construct {
     // Cluster
     this.cluster = new ecs.Cluster(this, 'Cluster', {
       vpc: props.vpc,
-      clusterName: `respawn-${config.environment}-${config.serviceName}`,
+      clusterName: clusterName(config.environment, config.serviceName),
       enableFargateCapacityProviders: true,
       executeCommandConfiguration: execConfig,
     });
@@ -290,7 +291,7 @@ export class GameServerFargateService extends Construct {
     this.service = new ecs.FargateService(this, 'Service', {
       cluster: this.cluster,
       taskDefinition,
-      serviceName: `respawn-${config.environment}-${config.serviceName}`,
+      serviceName: ecsServiceName(config.environment, config.serviceName),
       desiredCount: config.scaling.desiredCount,
       securityGroups: [networking.securityGroup],
       assignPublicIp: config.networking.enablePublicAccess,

@@ -107,18 +107,9 @@ export const ENVIRONMENT_OVERRIDES: Record<Environment, EnvironmentOverrides> = 
   },
 };
 
-export const STACK_NAME_PREFIX = 'respawn';
-
-export function sharedStackName(environment: Environment): string {
-  return `${STACK_NAME_PREFIX}-${environment}-shared`;
-}
-
-export function serviceStackName(
-  environment: Environment,
-  serviceName: string,
-): string {
-  return `${STACK_NAME_PREFIX}-${environment}-${serviceName}`;
-}
+// Stack/resource naming moved to ../naming.ts (single source of truth); re-exported
+// from the @respawn/core barrel, so existing `serviceStackName`/`sharedStackName`/
+// `STACK_NAME_PREFIX` imports from '@respawn/core' still resolve.
 
 export function defaultTags(
   environment: Environment,

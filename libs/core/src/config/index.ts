@@ -32,10 +32,14 @@ export {
   DEFAULT_PERSISTENT_STORAGE,
   DEFAULT_AWS,
   ENVIRONMENT_OVERRIDES,
+  defaultTags,
+} from './defaults.js';
+
+// Stack/resource naming lives in ../naming.ts now; keep the historical re-export path.
+export {
   STACK_NAME_PREFIX,
   sharedStackName,
   serviceStackName,
-  defaultTags,
-} from './defaults.js';
+} from '../naming.js';
 
 export { loadConfig } from './loader.js';

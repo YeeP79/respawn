@@ -1,48 +1,6 @@
-import { spawn } from 'node:child_process';
+import { runAws } from '../aws/exec.js';
+import { stateParameterName } from '../naming.js';
 
-interface AwsResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-function runAws(
-  args: string[],
-  opts: { profile?: string; region?: string },
-): Promise<AwsResult> {
-  return new Promise((resolve) => {
-    const finalArgs = [...args];
-    if (opts.region) finalArgs.push('--region', opts.region);
-    if (opts.profile) finalArgs.push('--profile', opts.profile);
-
-    const child = spawn('aws', finalArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('close', (code) =>
-      resolve({ exitCode: code ?? 1, stdout, stderr }),
-    );
-    child.on('error', (err) =>
-      resolve({ exitCode: 1, stdout, stderr: err.message }),
-    );
-  });
-}
-
-/**
- * Name of the SSM parameter holding a service's last recorded value for a check.
- *
- * Kept under `/respawn/<service>/state/` so it never collides with the
- * `/respawn/<service>/<secret>` SecureString namespace.
- */
-export function stateParameterName(
-  serviceName: string,
-  key: string,
-): string {
-  return `/respawn/${serviceName}/state/${key}`;
-}
 
 /**
  * Reads a recorded state value.

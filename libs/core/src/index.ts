@@ -6,6 +6,8 @@ export * from './config/types.js';
 export * from './config/defaults.js';
 export * from './config/preflight.js';
 export { loadConfig } from './config/loader.js';
+export * from './naming.js';
+export * from './aws/exec.js';
 
 export * from './utils/cdk-runner.js';
 export * from './utils/secrets-runner.js';

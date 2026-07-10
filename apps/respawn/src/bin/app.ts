@@ -3,7 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import type { Environment } from '@respawn/core';
 import { SharedStack } from '../stacks/shared-stack.js';
 import { GameServerStack } from '../stacks/game-server-stack.js';
-import { discoverServices } from '@respawn/core';
+import { discoverServices, sharedStackId, serviceStackId } from '@respawn/core';
 
 const app = new cdk.App();
 
@@ -68,7 +68,7 @@ const allEcrServices = allServices.filter((s) => !s.config.image.imageUri);
 const allImageUriServices = allServices.filter((s) => !!s.config.image.imageUri);
 
 // Shared stack (VPC, ECR repos) — a repo for every local-build service.
-const sharedStack = new SharedStack(app, `RespawnShared-${environment}`, {
+const sharedStack = new SharedStack(app, sharedStackId(environment), {
   environment,
   services: allEcrServices,
   env: {
@@ -84,7 +84,7 @@ for (const svc of allEcrServices) {
     throw new Error(`No ECR repo found for service: ${svc.name}`);
   }
 
-  const serviceStack = new GameServerStack(app, `Respawn-${environment}-${svc.name}`, {
+  const serviceStack = new GameServerStack(app, serviceStackId(environment, svc.name), {
     config: svc.config,
     vpc: sharedStack.vpc,
     ecrRepository: ecrRepo.repository,
@@ -102,7 +102,7 @@ for (const svc of allEcrServices) {
 
 // Per-service stacks — IMAGE_URI-based services (no ECR repo needed)
 for (const svc of allImageUriServices) {
-  const serviceStack = new GameServerStack(app, `Respawn-${environment}-${svc.name}`, {
+  const serviceStack = new GameServerStack(app, serviceStackId(environment, svc.name), {
     config: svc.config,
     vpc: sharedStack.vpc,
     imageUri: svc.config.image.imageUri,
