@@ -10,7 +10,98 @@ prints a URL + code you paste into the browser signed into the personal `d-90660
 portal. The token is short-lived and expires mid-session; re-run when a call reports
 `Token has expired`.
 
-**`main` is at `cfe3591`. Clean tree, pushed. All servers scaled to 0 — nothing billing.**
+**Branch `feat/ut99-uweb-variants` (off `main` `710a64a`), NOT pushed.** Five commits done
+(`a1c2b9b` → `c2c0217`), then an **in-progress tsdown conversion with uncommitted changes**.
+All servers scaled to 0 — nothing billing.
+
+---
+
+## ⚠️ RESUME HERE — this session's work (2026-07-10)
+
+Three big pieces landed on `feat/ut99-uweb-variants`, then a fourth (tsdown) is **mid-flight
+and uncommitted**. Read this before touching anything.
+
+### Committed (5 commits, verified green each time)
+
+1. `a1c2b9b` **UT99 uweb write transport + typed modData + per-project variants.**
+   - `rcon.py` gained a `uweb` HTTP transport (POST to the UWeb admin console on 5580) so
+     UT99 admin commands (`servertravel`, `kick`, `AddBots`, `say`, …) run through the MCP.
+     Reads stay on read-only `gamespy`; a `--write` flag routes writes to `uweb`. Verb is
+     **`servertravel`, NOT `switchlevel`** (verified against the real image).
+   - Manifest schema is now generic: `makeManifestSchema<T>` with typed `modData`, validated
+     per-service via `apps/respawn-mcp/src/mod-data.ts`.
+   - **Variants:** a project can hold `apps/<name>/variants/<variant>/` (own `.env`,
+     `Dockerfile`, `rcon-manifest.json`) layered over a base `apps/<name>/.env`. Identity is
+     author-controlled via `SERVICE_NAME`. `apps/ut99/` became `variants/modded` (keeps bare
+     `ut99`, roemer image) + `variants/vanilla` (`ut99-vanilla`, bymatej stock image). Only
+     `stack-discovery.ts` + `generate-manifests.mjs` decode the layout.
+
+2. `e47c3c6` `bb89552` `716e747` **Extract `@respawn/core` (`libs/core`).** The shared engine:
+   config loader, discovery, **one AWS-CLI runner** (`src/aws/exec.ts` — replaced 5 spawn
+   wrappers), **one naming module** (`src/naming.ts` — cluster/log/stack/ECR names + a
+   hyphen-safe parser), and the **action cores** (`src/actions/` — deploy/diff/synth/push/
+   updates headless; `destroy`/`status` split from their UI). `apps/respawn` is now the
+   CDK-synth app only.
+
+3. `5a40764` **`apps/cli` — dedicated clack CLI over core.** One `ACTION_HANDLERS` table
+   (`src/handlers.ts`) for both interactive (`src/menu.ts`) and batch (`src/batch.ts`);
+   `src/args.ts` parses argv. **The nx executor + `apps/respawn/src/{cli,executors}` are
+   deleted.** Root `respawn:*` scripts run `tsx apps/cli/src/index.ts`.
+
+4. `474b765` `c2c0217` **MCP = superset.** MCP consumes core's AWS runner + naming (dedup),
+   and gained lifecycle tools `synth`/`diff`/`check_updates` (read) + `deploy`/`push`/
+   `destroy` (gated by `RESPAWN_ALLOW_DEPLOYS`; `destroy` also needs `confirm=<name>`).
+   Services resolved via core's filesystem discovery (`RESPAWN_WORKSPACE_ROOT`, default cwd).
+
+### IN PROGRESS — convert the whole workspace to tsdown build-to-dist (NOT committed)
+
+**Why:** a `node`-run binary (the MCP, launched as `node dist/index.js` per its README /
+`.mcp.json`) **cannot consume the workspace's raw-TS package `exports`** (`"." → src/index.ts`).
+Only the tsx-run apps (cli, cdk) can. Phase 3 left a **stopgap** in the tree:
+`apps/respawn-mcp/build.mjs` (esbuild bundle + a `createRequire` banner) and a
+`build` target that runs it. **That is the hack being replaced.**
+
+**Decision (user-approved):** full spartan-toolkit pattern — every package builds to `dist`
+via **tsdown**, `exports` point at built JS, plus a `development` condition so tsx apps keep
+zero-build dev. Reference: `~/Projects/work/active/spartan-toolkit`, esp.
+`hippeis/packages/hippeis-mcp` (tsdown.config: `entry`, `format:'esm'`, `target:'node24'`,
+`dts`, `deps.alwaysBundle:[/^@internal\//]`; `package.json` bin/main/types→dist, workspace
+libs in devDeps, npm deps external; `project.json` build = `npx tsdown`, `dependsOn:[typecheck,^build]`).
+`libs/utilities` is the plain-lib template (tsdown.config + `main:./dist/index.mjs`,
+`types:./src/index.ts`, build target `npx tsdown`).
+
+**Remaining tasks (nx task list #22–#25):**
+- **#22** Add `tsdown` (root devDep). Give `shared-types`, `docker-utils`, `core` each a
+  `tsdown.config.ts` (esm/node24/dts/outDir dist, externalize deps), `package.json`
+  `exports: { ".": { "development": "./src/index.ts", "types": "./src/index.ts", "import": "./dist/index.mjs" } }` + `main`,
+  and a `project.json` `build` target (`npx tsdown`, outputs `dist`, `dependsOn ["^build"]`)
+  overriding the `@nx/js/typescript` inferred one.
+- **#23** Convert `respawn-mcp` to tsdown; **delete `build.mjs`** + the esbuild banner hack;
+  `bin/main/types → dist`. Verify `node dist/index.mjs` lists tools (probe below).
+- **#24** Add a tsdown build to `apps/cli`; make `pnpm respawn` + `apps/respawn/cdk.json` run
+  `tsx --conditions development …` so libs resolve to `src` (zero-build dev). Confirm tsx
+  honors `--conditions development`; if not, fall back to build-first.
+- **#25** Full `typecheck/lint/test/build` + runtime smoke; commit.
+
+**Gotchas already hit this session (don't rediscover):**
+- Two shebangs → syntax error: source `#!/usr/bin/env node` + a banner shebang collide.
+- esbuild ESM bundling a CJS dep (dotenv) throws “Dynamic require of fs” — needs a
+  `createRequire` shim. **tsdown/rolldown handles this**, which is why we're switching.
+- **eslint must ignore `dist/`** — bundled deps carry their own disable directives.
+  `eslint.config.mjs` now has `{ ignores: ['**/dist/**','**/node_modules/**'] }`. Keep it.
+- `nx.json` has `sync.applyChanges: true` (auto-maintains tsconfig refs) — added this session.
+- Cross-package imports resolve via pnpm-workspace `exports` (NO tsconfig `paths`).
+
+### Verify commands
+```bash
+npx nx run-many -t typecheck lint test build      # all 6 projects green before this session's tsdown work
+npx nx build respawn-mcp && node apps/respawn-mcp/dist/index.js   # must list tools incl. deploy/destroy/synth
+# MCP stdio tools/list + a gated deploy(ut99) probe: scratchpad mcp-probe.mjs / mcp-call.mjs
+cd apps/respawn && CDK_DEFAULT_ACCOUNT=000000000000 npx cdk list -c environment=dev \
+  -c workspaceRoot=$PWD/../.. -c services=ut99,ut99-vanilla -c imageTag=t   # stack names byte-stable
+```
+Local UT99 image checks used `docker run roemer/ut99-server` / `bymatej/ut99-server` (webadmin
+`admin/admin` on 5580, gamespy on 7778). Findings in the session scratchpad `uweb-findings.md`.
 
 ---
 
