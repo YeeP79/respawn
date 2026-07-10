@@ -11,13 +11,18 @@ export interface RconServer {
   task: string;
 }
 
-interface AwsJson {
+export interface AwsJson {
   exitCode: number;
   stdout: string;
   stderr: string;
 }
 
-function runAwsJson(
+export interface AwsOpts {
+  region?: string;
+  profile?: string;
+}
+
+export function runAwsJson(
   args: string[],
   opts: { region?: string; profile?: string },
 ): Promise<AwsJson> {
@@ -65,6 +70,34 @@ export function taskHasRconSidecar(describeTasksJson: string): boolean {
 }
 
 export const RCON_CONTAINER_NAME = RCON_CONTAINER;
+
+/**
+ * Finds a service's cluster and ECS service name whether or not it is running.
+ *
+ * `discoverRconServers` deliberately hides scaled-to-zero servers — you cannot rcon
+ * into a task that does not exist. Monitoring is the opposite: "why is nothing
+ * running" is exactly the question, so resolve by cluster name instead of by task.
+ */
+export async function findServiceCluster(
+  service: string,
+  opts: AwsOpts,
+): Promise<{ cluster: string; serviceName: string } | undefined> {
+  const clusters = await runAwsJson(['ecs', 'list-clusters'], opts);
+  if (clusters.exitCode !== 0) {
+    throw new Error(`aws ecs list-clusters failed: ${clusters.stderr.trim()}`);
+  }
+  const arn = (JSON.parse(clusters.stdout).clusterArns as string[]).find(
+    (c) => serviceFromCluster(c) === service,
+  );
+  if (!arn) return undefined;
+
+  const services = await runAwsJson(['ecs', 'list-services', '--cluster', arn], opts);
+  if (services.exitCode !== 0) return undefined;
+  const serviceArn = (JSON.parse(services.stdout).serviceArns as string[])[0];
+  if (!serviceArn) return undefined;
+
+  return { cluster: arn, serviceName: serviceArn.split('/').pop() ?? serviceArn };
+}
 
 /**
  * Discovers game servers whose running task carries an rcon-control sidecar.

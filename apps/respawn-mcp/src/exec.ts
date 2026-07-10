@@ -88,6 +88,20 @@ export function buildRemoteCommand(rconCommand: string): string {
   );
 }
 
+/**
+ * Builds the remote shell command for a Python probe, piping the script into
+ * `python3 -` over stdin rather than `eval`-ing it, so no quoting or shell
+ * metacharacter in the script can reach a shell at all.
+ */
+export function buildRemotePython(script: string): string {
+  const encoded = Buffer.from(script, 'utf-8').toString('base64');
+  return (
+    `sh -c 'echo ${RCON_BEGIN}; ` +
+    `echo ${encoded} | base64 -d | python3 -; ` +
+    `echo ${RCON_END}$?'`
+  );
+}
+
 export interface ExecTarget {
   cluster: string;
   task: string;
@@ -111,6 +125,28 @@ export function execRcon(
   rconCommand: string,
   timeoutMs = 20_000,
 ): Promise<RconResult> {
+  return runExec(target, buildRemoteCommand(rconCommand), timeoutMs);
+}
+
+/**
+ * Runs a Python probe in a task's sidecar via ECS Exec. Used for readings only the
+ * task itself can take — the ECS task metadata endpoint is reachable from inside
+ * the task and nowhere else.
+ */
+export function execPython(
+  target: ExecTarget,
+  script: string,
+  timeoutMs = 20_000,
+): Promise<RconResult> {
+  return runExec(target, buildRemotePython(script), timeoutMs);
+}
+
+/** Opens one ECS Exec session, runs an already-wrapped remote command, returns its reply. */
+function runExec(
+  target: ExecTarget,
+  remoteCommand: string,
+  timeoutMs: number,
+): Promise<RconResult> {
   const args = [
     'ecs',
     'execute-command',
@@ -122,7 +158,7 @@ export function execRcon(
     target.container,
     '--interactive',
     '--command',
-    buildRemoteCommand(rconCommand),
+    remoteCommand,
   ];
   if (target.region) args.push('--region', target.region);
   if (target.profile) args.push('--profile', target.profile);
