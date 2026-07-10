@@ -41,9 +41,14 @@ export class GameServerFargateService extends Construct {
 
     // When the rcon-control sidecar is on, audit every ECS Exec session to
     // CloudWatch — a record of who ran what. The channel is already TLS +
-    // IAM-authenticated by SSM. A customer KMS session key was tried but makes the
-    // interactive session fail to start ("Cannot perform start session: EOF"), so
-    // it is intentionally left off; the audit log is the durable hardening.
+    // IAM-authenticated by SSM.
+    //
+    // A customer KMS session key was removed here on the theory that it caused
+    // "Cannot perform start session: EOF". That was a misdiagnosis: the EOF comes
+    // from `aws ecs execute-command --interactive` being given a stdin that is not
+    // a TTY, and reproduces with KMS entirely absent (see exec.ts in respawn-mcp).
+    // KMS was never ruled out on its own merits and can be reinstated; the audit
+    // log is the durable hardening either way.
     let execConfig: ecs.ExecuteCommandConfiguration | undefined;
     let execKey: kms.Key | undefined;
     let execLogGroup: logs.LogGroup | undefined;

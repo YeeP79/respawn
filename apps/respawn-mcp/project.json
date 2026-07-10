@@ -11,6 +11,11 @@
       "dependsOn": [
         "generate-manifests"
       ],
+      "inputs": [
+        "default",
+        "^default",
+        "gameManifests"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "command": "tsc -p apps/respawn-mcp/tsconfig.build.json",
@@ -18,6 +23,15 @@
       }
     },
     "generate-manifests": {
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/generate-manifests.mjs",
+        "{projectRoot}/src/manifest.ts",
+        "gameManifests"
+      ],
+      "outputs": [
+        "{projectRoot}/src/manifests.generated.ts"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "command": "node --experimental-strip-types apps/respawn-mcp/generate-manifests.mjs",
@@ -27,16 +41,31 @@
     "typecheck": {
       "dependsOn": [
         "generate-manifests"
+      ],
+      "inputs": [
+        "default",
+        "^default",
+        "gameManifests"
       ]
     },
     "test": {
       "dependsOn": [
         "generate-manifests"
+      ],
+      "inputs": [
+        "default",
+        "^default",
+        "gameManifests"
       ]
     },
     "lint": {
       "dependsOn": [
         "generate-manifests"
+      ],
+      "inputs": [
+        "default",
+        "^default",
+        "gameManifests"
       ]
     }
   }

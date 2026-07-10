@@ -40,7 +40,15 @@ export class RconControlSidecar extends Construct {
       image: ecs.ContainerImage.fromAsset(sidecarDir),
       essential: false,
       cpu: 32,
-      memoryLimitMiB: 64,
+      // ECS Exec runs the SSM agent and a session worker per exec *inside this
+      // container's cgroup*. Measured rss during an exec is 20-45 MiB (container_stats
+      // against live doom2); 64 MiB held that, but left under 20 MiB of headroom at
+      // peak — one concurrent session short. 128 covers peak rss ~2.8x plus page cache.
+      //
+      // Judge this by rss, never by memory.usage_in_bytes: usage counts page cache,
+      // which expands to fill whatever limit it is given, so it reads ~100% at every
+      // limit and proves nothing. A high memory.failcnt is cache reclaim, not an OOM.
+      memoryLimitMiB: 128,
       environment: {
         SERVICE_NAME: props.serviceName,
         RCON_PROTOCOL: props.protocol,
