@@ -94,6 +94,14 @@ npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
 `RESPAWN_PROFILE` / `RESPAWN_REGION` fall back to `AWS_PROFILE` / `AWS_REGION`,
 then to `us-east-1`.
 
+**Lifecycle tools (deploy/destroy/synth/diff/push/check_updates).** Beyond controlling
+running servers, the MCP shares the CLI's deploy engine (`@respawn/core`). These tools
+read the repo, so set `RESPAWN_WORKSPACE_ROOT` to the repo root when the MCP runs
+elsewhere (defaults to the process cwd). The mutating ones — `deploy`, `push`, `destroy`
+— are disabled unless `RESPAWN_ALLOW_DEPLOYS=true`, and `destroy` additionally requires
+passing `confirm=<service name>`. `synth`, `diff`, and `check_updates` are read-only and
+always available.
+
 ### 5. The server must be deployed with the sidecar
 
 The MCP can only reach a server whose task carries the `rcon-control` sidecar,

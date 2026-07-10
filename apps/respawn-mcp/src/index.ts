@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import {
   McpServer,
   ResourceTemplate,
@@ -40,6 +39,18 @@ import {
   resolveCapabilities,
 } from './capabilities.js';
 import { runQuery } from './query-engine.js';
+import {
+  discoverServices,
+  synth as coreSynth,
+  diff as coreDiff,
+  updates as coreUpdates,
+  deploy as coreDeploy,
+  push as corePush,
+  destroy as coreDestroy,
+  type ActionResult,
+  type DiscoveredService,
+  type Environment,
+} from '@respawn/core';
 
 /**
  * Fills a command template's `{name}` placeholders from args.
@@ -66,6 +77,55 @@ const REGION = process.env['RESPAWN_REGION'] ?? process.env['AWS_REGION'] ?? 'us
 const PROFILE = process.env['RESPAWN_PROFILE'] ?? process.env['AWS_PROFILE'];
 
 const awsOpts = { region: REGION, profile: PROFILE };
+
+// Lifecycle tools (deploy/destroy/synth/...) read the repo — Dockerfiles, .env files,
+// the CDK app — unlike the control tools, which only need AWS. The repo root defaults
+// to cwd; set RESPAWN_WORKSPACE_ROOT when the MCP runs outside it. Mutating actions are
+// gated behind RESPAWN_ALLOW_DEPLOYS so an LLM cannot deploy or tear down by default.
+const WORKSPACE_ROOT = process.env['RESPAWN_WORKSPACE_ROOT'] ?? process.cwd();
+const DEPLOYS_ALLOWED = process.env['RESPAWN_ALLOW_DEPLOYS'] === 'true';
+
+/** Zod schema for the deploy environment, shared by the lifecycle tools. */
+const environmentSchema = z
+  .enum(['dev', 'staging', 'prod'])
+  .default('dev')
+  .describe('Target environment (default dev)');
+
+/**
+ * Resolves a repo-configured service (filesystem discovery — includes scaled-to-zero
+ * and every variant), distinct from discoverRconServers which only finds running tasks.
+ *
+ * @throws When the service is not found under the workspace root.
+ */
+function resolveConfiguredService(service: string, environment: Environment): DiscoveredService {
+  const match = discoverServices(WORKSPACE_ROOT, environment).find((s) => s.name === service);
+  if (!match) {
+    const known = discoverServices(WORKSPACE_ROOT, environment).map((s) => s.name).join(', ') || '(none)';
+    throw new Error(
+      `No configured service "${service}" under ${WORKSPACE_ROOT}. Known: ${known}. ` +
+        `Set RESPAWN_WORKSPACE_ROOT to the repo root if the MCP runs elsewhere.`,
+    );
+  }
+  return match;
+}
+
+/** Formats an action's ActionResult as a tool reply, marking failure. */
+function actionResult(result: ActionResult) {
+  return textResult(
+    `${result.success ? '✓' : '✗'} ${result.serviceName} ${result.action}: ${result.message}`,
+    !result.success,
+  );
+}
+
+/** Base context shared by every lifecycle action. */
+function actionContext(service: DiscoveredService, environment: Environment) {
+  return {
+    service,
+    environment,
+    workspaceRoot: WORKSPACE_ROOT,
+    ...(PROFILE ? { profile: PROFILE } : {}),
+  };
+}
 
 /** Resolves a service to its running task, or undefined if it is not up. */
 async function findTarget(service: string): Promise<ExecTarget | undefined> {
@@ -604,6 +664,118 @@ server.registerTool(
       );
     }
     return textResult(lines.join('\n'));
+  },
+);
+
+// --- Lifecycle tools: the CLI's deploy pipeline, exposed over MCP ------------
+// Read/preview actions are ungated; mutating ones require RESPAWN_ALLOW_DEPLOYS, and
+// destroy additionally requires typing the service name to confirm.
+
+server.registerTool(
+  'synth',
+  {
+    title: 'Synthesize CloudFormation',
+    description:
+      'Preview the CloudFormation a service would deploy — no changes made. Reads the ' +
+      'repo (set RESPAWN_WORKSPACE_ROOT if the MCP runs outside it).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(await coreSynth(actionContext(resolveConfiguredService(service, environment), environment))),
+);
+
+server.registerTool(
+  'diff',
+  {
+    title: 'Diff infrastructure',
+    description: 'Show the pending CloudFormation changes for a service (no changes made).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(await coreDiff(actionContext(resolveConfiguredService(service, environment), environment))),
+);
+
+server.registerTool(
+  'check_updates',
+  {
+    title: 'Check for updates',
+    description:
+      'Check whether a service has an upstream image / game update available, against the ' +
+      'last recorded deploy baseline. Read-only (does not record a new baseline).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(
+      await coreUpdates({ ...actionContext(resolveConfiguredService(service, environment), environment), record: false }),
+    ),
+);
+
+server.registerTool(
+  'deploy',
+  {
+    title: 'Deploy a server',
+    description:
+      'Build/push the image if needed and deploy the service via CDK. DESTRUCTIVE-ish ' +
+      '(changes live infrastructure) — disabled unless RESPAWN_ALLOW_DEPLOYS=true. Ensure ' +
+      'required secrets exist first (they are preflighted).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Deploys are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+    }
+    return actionResult(
+      await coreDeploy({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        requireApproval: 'never',
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'push',
+  {
+    title: 'Build & push image',
+    description:
+      'Build and push a service image to ECR without deploying. Requires Docker and ' +
+      'RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Pushes are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+    }
+    return actionResult(await corePush(actionContext(resolveConfiguredService(service, environment), environment)));
+  },
+);
+
+server.registerTool(
+  'destroy',
+  {
+    title: 'Destroy a server',
+    description:
+      'Tear down a service\'s stacks. DESTRUCTIVE and irreversible. Requires ' +
+      'RESPAWN_ALLOW_DEPLOYS=true AND passing confirm=<service name>.',
+    inputSchema: {
+      service: z.string(),
+      environment: environmentSchema,
+      confirm: z.string().describe('Type the exact service name to confirm this teardown.'),
+    },
+  },
+  async ({ service, environment, confirm }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Destroy is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable it.', true);
+    }
+    if (confirm !== service) {
+      return textResult(`Confirmation mismatch: pass confirm="${service}" to destroy it.`, true);
+    }
+    return actionResult(
+      await coreDestroy({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        force: true,
+      }),
+    );
   },
 );
 

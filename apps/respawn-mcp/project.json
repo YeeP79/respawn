@@ -18,7 +18,7 @@
       ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc -p apps/respawn-mcp/tsconfig.build.json",
+        "command": "node apps/respawn-mcp/build.mjs",
         "cwd": "{workspaceRoot}"
       }
     },

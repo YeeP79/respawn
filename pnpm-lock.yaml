@@ -118,6 +118,10 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+    devDependencies:
+      esbuild:
+        specifier: ^0.27.3
+        version: 0.27.3
 
   libs/core:
     dependencies:
