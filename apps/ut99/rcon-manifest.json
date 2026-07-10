@@ -17,6 +17,15 @@
         "gameMode": "^gamemode=(.*)$",
         "version": "^gamever=(.*)$"
       }
+    },
+    {
+      "name": "players",
+      "description": "Connected players (name, score, ping, team) from the GameSpy \\players\\ query. Bots and humans both appear; the query port lists no IPs.",
+      "rcon": "players",
+      "row": {
+        "match": "^player=(.*?)\\tfrags=(-?\\d+)\\tping=(\\d+)\\tteam=(\\d+)",
+        "fields": ["name", "score", "ping", "team"]
+      }
     }
   ]
 }

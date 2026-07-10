@@ -307,6 +307,47 @@ def _gamespy_pairs(payload: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def _split_index(key: str) -> tuple[str, int] | None:
+    r"""Split a GameSpy indexed key `base_N` into `(base, N)`, else None.
+
+    Player fields arrive keyed by slot — `player_0`, `frags_0`, `player_1`, ... — so
+    the trailing `_<digits>` groups a row rather than naming a field.
+    """
+    cut = key.rfind("_")
+    if cut > 0 and key[cut + 1 :].isdigit():
+        return key[:cut], int(key[cut + 1 :])
+    return None
+
+
+def _gamespy_normalize(payload: str) -> str:
+    r"""Turn a GameSpy infostring into lines the query engine can match.
+
+    Scalar keys become one `key=value` line each. Indexed keys (`player_0`, `frags_0`)
+    are transposed: all fields sharing an index collapse into a single tab-joined line
+    of `base=value` pairs — one line per player — because the query engine matches
+    `row` patterns per line and a player is otherwise smeared across eight of them.
+
+    Values are stripped (GameSpy pads `ping` with a leading space) and any tab inside
+    a value becomes a space, so tab stays a clean field separator for the row regex.
+    """
+    scalar: list[str] = []
+    rows: dict[int, list[tuple[str, str]]] = {}
+    for key, value in _gamespy_pairs(payload):
+        if key in ("queryid", "final"):
+            continue
+        clean = value.strip().replace("\t", " ")
+        indexed = _split_index(key)
+        if indexed is None:
+            scalar.append(f"{key}={clean}")
+        else:
+            base, idx = indexed
+            rows.setdefault(idx, []).append((base, clean))
+    lines = list(scalar)
+    for idx in sorted(rows):
+        lines.append("\t".join(f"{base}={val}" for base, val in rows[idx]))
+    return "\n".join(lines)
+
+
 def _gamespy_reassemble(packets: list[bytes]) -> str:
     r"""Order multi-packet replies by their `\queryid\N.M` sequence number.
 
@@ -342,8 +383,9 @@ def gamespy_exec(host: str, port: int, password: str, command: str, timeout: flo
               long. Prefix a query with `raw:` to get the wire payload verbatim,
               which is how an unfamiliar reply gets captured before it is parsed.
 
-    Returns `key=value` lines, one per pair, in wire order — the query engine
-    matches per line, and a single `\\k\\v\\` blob has no lines to match.
+    Returns scalar fields as `key=value` lines and player slots as one tab-joined
+    line each (see _gamespy_normalize) — the query engine matches per line, and a
+    single `\\k\\v\\` blob has no lines to match.
     """
     query = (command or "info").strip()
     raw_mode = query.startswith("raw:")
@@ -374,12 +416,7 @@ def gamespy_exec(host: str, port: int, password: str, command: str, timeout: flo
         payload = _gamespy_reassemble(packets)
         if raw_mode:
             return payload
-        lines = [
-            f"{key}={value}"
-            for key, value in _gamespy_pairs(payload)
-            if key not in ("queryid", "final")
-        ]
-        return "\n".join(lines)
+        return _gamespy_normalize(payload)
     finally:
         sock.close()
 
