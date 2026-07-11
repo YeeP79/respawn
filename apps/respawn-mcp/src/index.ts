@@ -39,7 +39,21 @@ import {
   manifestedServices,
   resolveCapabilities,
 } from './capabilities.js';
+import { resolveWireCommand } from './manifest.js';
 import { runQuery } from './query-engine.js';
+import {
+  discoverServices,
+  synth as coreSynth,
+  diff as coreDiff,
+  updates as coreUpdates,
+  deploy as coreDeploy,
+  push as corePush,
+  destroy as coreDestroy,
+  scale as coreScale,
+  type ActionResult,
+  type DiscoveredService,
+  type Environment,
+} from '@respawn/core';
 
 /**
  * Fills a command template's `{name}` placeholders from args.
@@ -66,6 +80,55 @@ const REGION = process.env['RESPAWN_REGION'] ?? process.env['AWS_REGION'] ?? 'us
 const PROFILE = process.env['RESPAWN_PROFILE'] ?? process.env['AWS_PROFILE'];
 
 const awsOpts = { region: REGION, profile: PROFILE };
+
+// Lifecycle tools (deploy/destroy/synth/...) read the repo — Dockerfiles, .env files,
+// the CDK app — unlike the control tools, which only need AWS. The repo root defaults
+// to cwd; set RESPAWN_WORKSPACE_ROOT when the MCP runs outside it. Mutating actions are
+// gated behind RESPAWN_ALLOW_DEPLOYS so an LLM cannot deploy or tear down by default.
+const WORKSPACE_ROOT = process.env['RESPAWN_WORKSPACE_ROOT'] ?? process.cwd();
+const DEPLOYS_ALLOWED = process.env['RESPAWN_ALLOW_DEPLOYS'] === 'true';
+
+/** Zod schema for the deploy environment, shared by the lifecycle tools. */
+const environmentSchema = z
+  .enum(['dev', 'staging', 'prod'])
+  .default('dev')
+  .describe('Target environment (default dev)');
+
+/**
+ * Resolves a repo-configured service (filesystem discovery — includes scaled-to-zero
+ * and every variant), distinct from discoverRconServers which only finds running tasks.
+ *
+ * @throws When the service is not found under the workspace root.
+ */
+function resolveConfiguredService(service: string, environment: Environment): DiscoveredService {
+  const match = discoverServices(WORKSPACE_ROOT, environment).find((s) => s.name === service);
+  if (!match) {
+    const known = discoverServices(WORKSPACE_ROOT, environment).map((s) => s.name).join(', ') || '(none)';
+    throw new Error(
+      `No configured service "${service}" under ${WORKSPACE_ROOT}. Known: ${known}. ` +
+        `Set RESPAWN_WORKSPACE_ROOT to the repo root if the MCP runs elsewhere.`,
+    );
+  }
+  return match;
+}
+
+/** Formats an action's ActionResult as a tool reply, marking failure. */
+function actionResult(result: ActionResult) {
+  return textResult(
+    `${result.success ? '✓' : '✗'} ${result.serviceName} ${result.action}: ${result.message}`,
+    !result.success,
+  );
+}
+
+/** Base context shared by every lifecycle action. */
+function actionContext(service: DiscoveredService, environment: Environment) {
+  return {
+    service,
+    environment,
+    workspaceRoot: WORKSPACE_ROOT,
+    ...(PROFILE ? { profile: PROFILE } : {}),
+  };
+}
 
 /** Resolves a service to its running task, or undefined if it is not up. */
 async function findTarget(service: string): Promise<ExecTarget | undefined> {
@@ -99,9 +162,9 @@ function textResult(text: string, isError = false) {
 }
 
 /** Runs a command and formats the reply, turning a non-zero rcon exit into an error. */
-async function runAndFormat(service: string, command: string) {
+async function runAndFormat(service: string, command: string, opts: { write?: boolean } = {}) {
   const target = await resolveTarget(service);
-  const result: RconResult = await execRcon(target, command);
+  const result: RconResult = await execRcon(target, command, undefined, opts);
   if (result.exitCode !== 0) {
     return textResult(
       `rcon failed (exit ${result.exitCode}) on ${service}:\n${result.output || '(no output)'}`,
@@ -227,7 +290,9 @@ server.registerTool(
     } catch (err) {
       return textResult((err as Error).message, true);
     }
-    return runAndFormat(service, rcon);
+    // Commands change state → the write transport (RCON_WRITE_*), which for UT99 is
+    // the authenticated uweb admin console rather than the read-only gamespy port.
+    return runAndFormat(service, rcon, { write: true });
   },
 );
 
@@ -279,7 +344,7 @@ server.registerTool(
       value: z.string().describe('New value'),
     },
   },
-  async ({ service, cvar, value }) => runAndFormat(service, `${cvar} "${value}"`),
+  async ({ service, cvar, value }) => runAndFormat(service, `${cvar} "${value}"`, { write: true }),
 );
 
 server.registerTool(
@@ -288,10 +353,19 @@ server.registerTool(
     title: 'Raw rcon command',
     description:
       'Run an arbitrary rcon command. Escape hatch for anything the declared ' +
-      'commands do not cover; passed to the game verbatim.',
-    inputSchema: { service: z.string(), command: z.string() },
+      'commands do not cover; passed to the game verbatim. Defaults to the write ' +
+      'transport (state-changing); set write=false to force the read transport, which ' +
+      'only matters for a game with a separate read/write path (UT99: gamespy vs uweb).',
+    inputSchema: {
+      service: z.string(),
+      command: z.string(),
+      write: z
+        .boolean()
+        .optional()
+        .describe('Use the write transport. Default true; false forces the read path.'),
+    },
   },
-  async ({ service, command }) => runAndFormat(service, command),
+  async ({ service, command, write }) => runAndFormat(service, command, { write: write ?? true }),
 );
 
 server.registerTool(
@@ -308,12 +382,19 @@ server.registerTool(
       service: z.string(),
       command: z
         .string()
-        .describe('Query or command to send verbatim, e.g. "players" or "status"'),
+        .describe(
+          'A declared query name (e.g. "server_info") — resolved to its raw transport ' +
+            'token via the manifest — or, for a server with no manifest, a raw token to ' +
+            'send verbatim (e.g. gamespy "info"/"status", goldsrc "status").',
+        ),
     },
   },
   async ({ service, command }) => {
+    // A declared query name resolves to its wire token; anything else goes verbatim, so an
+    // unfamiliar/manifest-less server can still be probed. See resolveWireCommand.
+    const wire = resolveWireCommand(getManifest(service), command);
     const target = await resolveTarget(service);
-    const result = await execRcon(target, command, undefined, { raw: true });
+    const result = await execRcon(target, wire, undefined, { raw: true });
     if (result.exitCode !== 0) {
       return textResult(`capture failed on ${service}:\n${result.output || '(no output)'}`, true);
     }
@@ -593,6 +674,153 @@ server.registerTool(
       );
     }
     return textResult(lines.join('\n'));
+  },
+);
+
+// --- Lifecycle tools: the CLI's deploy pipeline, exposed over MCP ------------
+// Read/preview actions are ungated; mutating ones require RESPAWN_ALLOW_DEPLOYS, and
+// destroy additionally requires typing the service name to confirm.
+
+server.registerTool(
+  'synth',
+  {
+    title: 'Synthesize CloudFormation',
+    description:
+      'Preview the CloudFormation a service would deploy — no changes made. Reads the ' +
+      'repo (set RESPAWN_WORKSPACE_ROOT if the MCP runs outside it).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(await coreSynth(actionContext(resolveConfiguredService(service, environment), environment))),
+);
+
+server.registerTool(
+  'diff',
+  {
+    title: 'Diff infrastructure',
+    description: 'Show the pending CloudFormation changes for a service (no changes made).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(await coreDiff(actionContext(resolveConfiguredService(service, environment), environment))),
+);
+
+server.registerTool(
+  'check_updates',
+  {
+    title: 'Check for updates',
+    description:
+      'Check whether a service has an upstream image / game update available, against the ' +
+      'last recorded deploy baseline. Read-only (does not record a new baseline).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) =>
+    actionResult(
+      await coreUpdates({ ...actionContext(resolveConfiguredService(service, environment), environment), record: false }),
+    ),
+);
+
+server.registerTool(
+  'deploy',
+  {
+    title: 'Deploy a server',
+    description:
+      'Build/push the image if needed and deploy the service via CDK. DESTRUCTIVE-ish ' +
+      '(changes live infrastructure) — disabled unless RESPAWN_ALLOW_DEPLOYS=true. Ensure ' +
+      'required secrets exist first (they are preflighted).',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Deploys are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+    }
+    return actionResult(
+      await coreDeploy({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        requireApproval: 'never',
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'push',
+  {
+    title: 'Build & push image',
+    description:
+      'Build and push a service image to ECR without deploying. Requires Docker and ' +
+      'RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: { service: z.string(), environment: environmentSchema },
+  },
+  async ({ service, environment }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Pushes are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+    }
+    return actionResult(await corePush(actionContext(resolveConfiguredService(service, environment), environment)));
+  },
+);
+
+server.registerTool(
+  'destroy',
+  {
+    title: 'Destroy a server',
+    description:
+      'Tear down a service\'s stacks. DESTRUCTIVE and irreversible. Requires ' +
+      'RESPAWN_ALLOW_DEPLOYS=true AND passing confirm=<service name>.',
+    inputSchema: {
+      service: z.string(),
+      environment: environmentSchema,
+      confirm: z.string().describe('Type the exact service name to confirm this teardown.'),
+    },
+  },
+  async ({ service, environment, confirm }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Destroy is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable it.', true);
+    }
+    if (confirm !== service) {
+      return textResult(`Confirmation mismatch: pass confirm="${service}" to destroy it.`, true);
+    }
+    return actionResult(
+      await coreDestroy({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        force: true,
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'scale',
+  {
+    title: 'Scale a server (wake / sleep)',
+    description:
+      'Set a service\'s ECS desiredCount — wake a task (1) or sleep it (0) WITHOUT a ' +
+      'redeploy. This is the one thing the control tools cannot do on their own: they ' +
+      'drive a running task but cannot start one. Changes live infrastructure and billing, ' +
+      'so it is disabled unless RESPAWN_ALLOW_DEPLOYS=true. Returns immediately; reaching ' +
+      'RUNNING takes ~1–2 min — poll server_health for the task and its rcon-control agent.',
+    inputSchema: {
+      service: z.string(),
+      environment: environmentSchema,
+      desiredCount: z
+        .number()
+        .int()
+        .min(0)
+        .max(1)
+        .describe('0 = sleep (stop the task), 1 = wake (start one task).'),
+    },
+  },
+  async ({ service, environment, desiredCount }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Scaling is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy/scale.', true);
+    }
+    return actionResult(
+      await coreScale({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        desiredCount,
+        region: REGION,
+      }),
+    );
   },
 );
 

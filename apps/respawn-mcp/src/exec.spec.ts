@@ -89,4 +89,14 @@ describe('buildRemoteCommand', () => {
     const encoded = /echo (\S+) \| base64 -d/.exec(buildRemoteCommand(nasty));
     expect(Buffer.from(encoded![1]!, 'base64').toString('utf-8')).toBe(nasty);
   });
+
+  it('adds --write only when the write option is set', () => {
+    expect(buildRemoteCommand('kick bob')).not.toContain('--write');
+    expect(buildRemoteCommand('kick bob', { write: true })).toContain('rcon.py --write');
+  });
+
+  it('combines --raw and --write flags', () => {
+    const cmd = buildRemoteCommand('players', { raw: true, write: true });
+    expect(cmd).toContain('rcon.py --raw --write');
+  });
 });

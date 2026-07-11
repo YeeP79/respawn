@@ -1,0 +1,17 @@
+{
+  "name": "@respawn/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "respawn": "./dist/index.mjs"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.10.0",
+    "@respawn/core": "workspace:*",
+    "chalk": "^5.4.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4"
+  }
+}

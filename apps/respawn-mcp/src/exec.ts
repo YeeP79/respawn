@@ -79,12 +79,18 @@ function ptyWrap(argv: readonly string[]): { command: string; args: string[] } {
  * no amount of quoting or shell metacharacters in it can break out or inject —
  * it only ever becomes an argument to rcon.py.
  */
-export function buildRemoteCommand(rconCommand: string, opts: { raw?: boolean } = {}): string {
+export function buildRemoteCommand(
+  rconCommand: string,
+  opts: { raw?: boolean; write?: boolean } = {},
+): string {
   const encoded = Buffer.from(rconCommand, 'utf-8').toString('base64');
-  const rawFlag = opts.raw ? ' --raw' : '';
+  // --write routes to the sidecar's write transport (RCON_WRITE_*); state-changing
+  // tools set it. Absent, rcon.py uses the read transport — and for a single-rcon
+  // game --write falls through to the same one, so the flag is always safe to pass.
+  const flags = `${opts.raw ? ' --raw' : ''}${opts.write ? ' --write' : ''}`;
   return (
     `sh -c 'echo ${RCON_BEGIN}; ` +
-    `python3 /usr/local/bin/rcon.py${rawFlag} --command "$(echo ${encoded} | base64 -d)"; ` +
+    `python3 /usr/local/bin/rcon.py${flags} --command "$(echo ${encoded} | base64 -d)"; ` +
     `echo ${RCON_END}$?'`
   );
 }
@@ -130,7 +136,7 @@ export function execRcon(
   target: ExecTarget,
   rconCommand: string,
   timeoutMs = 20_000,
-  opts: { raw?: boolean } = {},
+  opts: { raw?: boolean; write?: boolean } = {},
 ): Promise<RconResult> {
   return runExec(target, buildRemoteCommand(rconCommand, opts), timeoutMs);
 }

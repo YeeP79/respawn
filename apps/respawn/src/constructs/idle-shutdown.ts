@@ -3,7 +3,7 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import type { IdleShutdownConfig } from '../config/types.js';
+import type { IdleShutdownConfig } from '@respawn/core';
 
 export interface IdleShutdownSidecarProps {
   taskDefinition: ecs.FargateTaskDefinition;

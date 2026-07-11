@@ -1,7 +1,8 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import type { Environment } from '../config/types.js';
+import type { Environment } from '@respawn/core';
+import { logGroupName } from '@respawn/core';
 
 const RETENTION_MAP: Record<number, logs.RetentionDays> = {
   1: logs.RetentionDays.ONE_DAY,
@@ -53,7 +54,7 @@ export class GameServerLogging extends Construct {
     super(scope, id);
 
     this.logGroup = new logs.LogGroup(this, 'LogGroup', {
-      logGroupName: `/respawn/${props.environment}/${props.serviceName}`,
+      logGroupName: logGroupName(props.environment, props.serviceName),
       retention: mapRetentionDays(props.retentionDays),
       removalPolicy: RemovalPolicy.DESTROY,
     });

@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { parseManifest } from './manifest.js';
+import { z } from 'zod';
+import { parseManifest, resolveWireCommand } from './manifest.js';
 import { parseMapList } from './capabilities.js';
+import { MOD_DATA_SCHEMAS } from './mod-data.js';
 
 describe('parseManifest', () => {
   it('defaults service to the directory name', () => {
@@ -89,6 +91,54 @@ describe('parseManifest', () => {
   });
 });
 
+describe('parseManifest modData (generic)', () => {
+  it('passes arbitrary modData through when no schema is supplied', () => {
+    const m = parseManifest({ modData: { anything: [1, 'two'] } }, 'x');
+    expect(m.modData).toEqual({ anything: [1, 'two'] });
+  });
+
+  it('validates manifest-level modData against a supplied schema', () => {
+    const schema = z.array(z.object({ name: z.string() }).strict());
+    expect(parseManifest({ modData: [{ name: 'ok' }] }, 'x', schema).modData).toEqual([
+      { name: 'ok' },
+    ]);
+    expect(() => parseManifest({ modData: [{ name: 1 }] }, 'x', schema)).toThrow();
+    expect(() => parseManifest({ modData: [{ name: 'ok', extra: true }] }, 'x', schema)).toThrow();
+  });
+
+  it('validates per-command and per-query modData against the same schema', () => {
+    const schema = z.object({ tier: z.number() }).strict();
+    expect(() =>
+      parseManifest(
+        { commands: [{ name: 'c', description: 'd', rcon: 'r', modData: { tier: 'high' } }] },
+        'x',
+        schema,
+      ),
+    ).toThrow();
+    expect(() =>
+      parseManifest(
+        { queries: [{ name: 'q', description: 'd', rcon: 'r', modData: { tier: 2 } }] },
+        'x',
+        schema,
+      ),
+    ).not.toThrow();
+  });
+
+  it('validates the ut99 shipped-mod catalogue with its registered schema', () => {
+    const schema = MOD_DATA_SCHEMAS['ut99'];
+    const good = [{ name: 'MonsterHunt', package: 'MonsterHunt', kind: 'gametype', control: 'admin' }];
+    expect(parseManifest({ modData: good }, 'ut99', schema).modData).toEqual(good);
+    // A control style outside the enum is a build-time failure, not a silent drop.
+    expect(() =>
+      parseManifest(
+        { modData: [{ name: 'X', package: 'P', kind: 'mutator', control: 'sometimes' }] },
+        'ut99',
+        schema,
+      ),
+    ).toThrow();
+  });
+});
+
 describe('parseMapList', () => {
   it('extracts bare map names from a GoldSrc "maps *" reply', () => {
     const raw = [
@@ -109,5 +159,41 @@ describe('parseMapList', () => {
 
   it('returns empty for an empty reply', () => {
     expect(parseMapList('')).toEqual([]);
+  });
+});
+
+describe('resolveWireCommand', () => {
+  const manifest = parseManifest(
+    {
+      queries: [
+        { name: 'server_info', description: 'info', rcon: 'info', singles: { map: '^mapname=(.*)$' } },
+        { name: 'players', description: 'players', rcon: 'players', singles: {} },
+        { name: 'rules', description: 'rules', rcon: 'rules', singles: {} },
+      ],
+    },
+    'ut99',
+  );
+
+  it('resolves a declared query name to its transport token', () => {
+    // The regression: capture_raw server_info used to go on the wire as "server_info"
+    // and be rejected, because its raw gamespy token is "info".
+    expect(resolveWireCommand(manifest, 'server_info')).toBe('info');
+  });
+
+  it('is a no-op when a query name equals its token', () => {
+    expect(resolveWireCommand(manifest, 'players')).toBe('players');
+    expect(resolveWireCommand(manifest, 'rules')).toBe('rules');
+  });
+
+  it('passes an undeclared raw token through verbatim', () => {
+    // Keeps capture_raw usable for authoring against an unfamiliar server.
+    expect(resolveWireCommand(manifest, 'info')).toBe('info');
+    expect(resolveWireCommand(manifest, 'basic')).toBe('basic');
+    expect(resolveWireCommand(manifest, 'status')).toBe('status');
+  });
+
+  it('passes everything through when the service has no manifest', () => {
+    expect(resolveWireCommand(undefined, 'status')).toBe('status');
+    expect(resolveWireCommand(undefined, 'server_info')).toBe('server_info');
   });
 });

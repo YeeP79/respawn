@@ -22,7 +22,7 @@ never set `CI=true` to force it, which silently wipes `node_modules`:
 npx nx run-many -t typecheck        # same target, no dep-status check
 ```
 
-**Deployment CLI** (interactive Clack menu — deploy, diff, synth, status, destroy, secrets):
+**Deployment CLI** (interactive Clack menu — deploy, diff, synth, status, scale, destroy, secrets):
 
 ```bash
 pnpm respawn                        # requires: aws sso login --profile respawn
@@ -84,6 +84,18 @@ logic must ship with specs; that is where the bugs are.
 | `Dockerfile` | Even when `IMAGE_URI` is set (unused, but discovery-friendly) |
 | `project.json` | `{"name","projectType":"application","tags":["type:app","lang:dockerfile"]}` |
 
+**Variants (one project, multiple builds).** A project can offer several builds — e.g.
+different mod sets — that deploy independently. Add a `variants/` dir; each
+`apps/<project>/variants/<variant>/` holds its own `.env`, `.env.example`, `Dockerfile`,
+and `rcon-manifest.json`, layered over a shared base `apps/<project>/.env` (the overlay
+wins on a key collision — put common knobs like ports/CPU/AWS in the base, deltas in the
+variant). Identity is author-controlled via each variant's `SERVICE_NAME`: the canonical
+build keeps the bare project name (`ut99`), others get a suffix (`ut99-vanilla`). A project
+with a `variants/` dir is represented **only** by its variants — the project dir itself is
+not a service. See `apps/ut99` (`modded` = roemer image; `vanilla` = bymatej image). Only
+discovery (`stack-discovery.ts`) and the manifest generator decode this layout; every other
+consumer reads discovery output, so a variant is a first-class service everywhere else.
+
 **Two image strategies.** Prefer the first:
 
 1. **`IMAGE_URI` set** — upstream image, no build. Works when the image reads its
@@ -95,8 +107,10 @@ logic must ship with specs; that is where the bugs are.
    See `apps/gmod`, `apps/css` (LinuxGSM), `apps/cs16` (HLDS).
 
 **Secrets.** `SECRET_REFS` → ECS `secrets:` (never `environment:`). Set values with the
-`Secrets` CLI action, which writes to Secrets Manager / SSM over stdin. Naming:
-`respawn/<service>/<name>` (sm), `/respawn/<service>/<name>` (ssm).
+`Secrets` CLI action, which writes to Secrets Manager / SSM over stdin. Interactive via
+`pnpm respawn` → Secrets; headless (for automation) pipes the value on stdin — never argv:
+`echo -n "$VALUE" | respawn --non-interactive --action secrets --service <svc> --secret <ENV_VAR>`.
+Naming: `respawn/<service>/<name>` (sm), `/respawn/<service>/<name>` (ssm).
 Full spec: `artifacts/AGENT_PROMPT.md` §7.
 
 ---
@@ -163,9 +177,10 @@ Also check the base image's `USER` before adding `RUN chmod +x` — `jives/hlds`
 
 ### `pnpm respawn:*` scripts hardcode a `--service` list
 
-The batch scripts in `package.json` name each service explicitly — currently all 14. It is
-easy to forget when adding a server, and a missing name is skipped silently. Add yours, or
-use the interactive `pnpm respawn` menu, which discovers them properly.
+The batch scripts in `package.json` name each service explicitly — currently all 16,
+counting each variant separately (`ut99` and `ut99-vanilla` are two entries). It is easy to
+forget when adding a server or a variant, and a missing name is skipped silently. Add yours,
+or use the interactive `pnpm respawn` menu, which discovers them properly.
 
 ### `netstat` idle detection is blind to UDP games
 

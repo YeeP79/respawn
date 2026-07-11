@@ -1,7 +1,10 @@
-import { spawn } from 'node:child_process';
-
-const RCON_CONTAINER = 'rcon-control';
-const CLUSTER_PREFIX = 'respawn-';
+import {
+  runAws,
+  serviceFromClusterName,
+  CLUSTER_PREFIX,
+  RCON_CONTAINER_NAME as CORE_RCON_CONTAINER_NAME,
+  type AwsResult,
+} from '@respawn/core';
 
 export interface RconServer {
   /** Service name, e.g. `cs16`. */
@@ -11,44 +14,23 @@ export interface RconServer {
   task: string;
 }
 
-export interface AwsJson {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
+export type AwsJson = AwsResult;
 
 export interface AwsOpts {
   region?: string;
   profile?: string;
 }
 
-export function runAwsJson(
-  args: string[],
-  opts: { region?: string; profile?: string },
-): Promise<AwsJson> {
-  const finalArgs = [...args, '--output', 'json'];
-  if (opts.region) finalArgs.push('--region', opts.region);
-  if (opts.profile) finalArgs.push('--profile', opts.profile);
-
-  return new Promise((resolve) => {
-    const child = spawn('aws', finalArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
-    child.on('close', (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-    child.on('error', (err) => resolve({ exitCode: 1, stdout, stderr: err.message }));
-  });
+/**
+ * `aws … --output json` via the shared core runner. Returns the raw result (callers
+ * JSON.parse and branch on exitCode, so a missing cluster is a skip, not a throw).
+ */
+export function runAwsJson(args: string[], opts: AwsOpts): Promise<AwsJson> {
+  return runAws([...args, '--output', 'json'], opts);
 }
 
-/** Parses `respawn-<env>-<service>` into its service name. */
-export function serviceFromCluster(clusterArn: string): string | undefined {
-  const name = clusterArn.split('/').pop() ?? clusterArn;
-  if (!name.startsWith(CLUSTER_PREFIX)) return undefined;
-  // respawn-<env>-<service> — service is everything after the second dash.
-  const parts = name.split('-');
-  return parts.length >= 3 ? parts.slice(2).join('-') : undefined;
-}
+/** Parses `respawn-<env>-<service>` into its service name (core naming). */
+export const serviceFromCluster = serviceFromClusterName;
 
 /** True when a describe-tasks payload has a RUNNING rcon-control container. */
 export function taskHasRconSidecar(describeTasksJson: string): boolean {
@@ -62,14 +44,14 @@ export function taskHasRconSidecar(describeTasksJson: string): boolean {
     const task = parsed.tasks?.[0];
     if (task?.lastStatus !== 'RUNNING') return false;
     return (task.containers ?? []).some(
-      (c) => c.name === RCON_CONTAINER && c.lastStatus === 'RUNNING',
+      (c) => c.name === CORE_RCON_CONTAINER_NAME && c.lastStatus === 'RUNNING',
     );
   } catch {
     return false;
   }
 }
 
-export const RCON_CONTAINER_NAME = RCON_CONTAINER;
+export const RCON_CONTAINER_NAME = CORE_RCON_CONTAINER_NAME;
 
 /**
  * Finds a service's cluster and ECS service name whether or not it is running.

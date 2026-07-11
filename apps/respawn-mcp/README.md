@@ -71,7 +71,7 @@ server discovery. (An admin/power-user SSO role already covers these.)
 
 ```bash
 pnpm install
-npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
+npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.mjs
 ```
 
 ### 4. Point your MCP client at it
@@ -81,7 +81,7 @@ npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
   "mcpServers": {
     "respawn-rcon": {
       "command": "node",
-      "args": ["/absolute/path/to/repo/apps/respawn-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/repo/apps/respawn-mcp/dist/index.mjs"],
       "env": {
         "RESPAWN_PROFILE": "respawn",
         "RESPAWN_REGION": "us-east-1"
@@ -99,15 +99,27 @@ then to `us-east-1`.
 > fleet runs in `us-east-2`) makes `list_servers` return nothing — it looks like an
 > auth problem but isn't. Check with `aws ecs list-clusters --region <region> --profile respawn`.
 
+**Lifecycle tools (deploy/destroy/synth/diff/push/check_updates/scale).** Beyond controlling
+running servers, the MCP shares the CLI's deploy engine (`@respawn/core`). These tools
+read the repo, so set `RESPAWN_WORKSPACE_ROOT` to the repo root when the MCP runs
+elsewhere (defaults to the process cwd). The mutating ones — `deploy`, `push`, `destroy`,
+`scale` — are disabled unless `RESPAWN_ALLOW_DEPLOYS=true`, and `destroy` additionally
+requires passing `confirm=<service name>`. `synth`, `diff`, and `check_updates` are
+read-only and always available. **`scale`** sets a service's ECS `desiredCount`
+(`0`=sleep, `1`=wake) without a redeploy — the way to start the very task the control
+tools then reach; it returns immediately and the task is RUNNING in ~1–2 min.
+
 ### 5. The server must be deployed with the sidecar
 
 The MCP can only reach a server whose task carries the `rcon-control` sidecar,
 which means the service was deployed with **`ENABLE_RCON_CONTROL=true`** (this
 flips `enableExecuteCommand` and adds the container). A server without it — or one
-scaled to zero — will not appear in `list_servers`. Deploy or wake it first:
+scaled to zero — will not appear in `list_servers`. Wake it first (no redeploy needed):
 
 ```bash
-pnpm respawn:deploy   # or: aws ecs update-service … --desired-count 1
+# MCP: scale {service, environment, desiredCount:1}   (RESPAWN_ALLOW_DEPLOYS=true)
+# CLI: respawn --non-interactive --action scale --service <svc> --environment dev --count 1
+pnpm respawn:deploy   # or a full (re)deploy, which re-asserts the configured desiredCount
 ```
 
 ### Quick check

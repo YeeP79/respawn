@@ -1,6 +1,7 @@
 import { RemovalPolicy } from 'aws-cdk-lib';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import { Construct } from 'constructs';
+import { ecrRepositoryName } from '@respawn/core';
 
 export interface GameServerEcrRepoProps {
   serviceName: string;
@@ -14,7 +15,7 @@ export class GameServerEcrRepo extends Construct {
     super(scope, id);
 
     this.repository = new ecr.Repository(this, 'Repository', {
-      repositoryName: `respawn/${props.serviceName}`,
+      repositoryName: ecrRepositoryName(props.serviceName),
       imageScanOnPush: true,
       removalPolicy: RemovalPolicy.RETAIN,
       lifecycleRules: [

@@ -1,9 +1,0 @@
-{
-  "executors": {
-    "cdk": {
-      "implementation": "./src/executors/cdk/executor",
-      "schema": "./src/executors/cdk/schema.json",
-      "description": "Deploy and manage game servers via CDK"
-    }
-  }
-}

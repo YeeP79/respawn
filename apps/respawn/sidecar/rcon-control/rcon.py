@@ -22,10 +22,16 @@ Exit codes: 0 on success, 1 on failure (auth rejected, timeout, bad protocol).
 """
 
 import argparse
+import base64
+import html
 import os
+import re
 import socket
 import struct
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Callable
 
 GOLDSRC_PREFIX = b"\xff\xff\xff\xff"
@@ -414,12 +420,95 @@ def gamespy_exec(host: str, port: int, password: str, command: str, timeout: flo
         sock.close()
 
 
+# UWeb (Unreal Engine 1 web admin) console. UT99's writes live here, not on the
+# GameSpy query port: the server runs an authenticated HTTP admin whose "console"
+# accepts the same commands an in-game admin types after `adminlogin`. This is the
+# write counterpart to gamespy's read — a service can speak both (reads on 7778,
+# writes on 5580). Verified against roemer/ut99-server: the console form POSTs
+# `SendText`/`Send` to /ServerAdmin/current_console, and command output surfaces in
+# the separate /ServerAdmin/current_console_log frame — the POST body is just the
+# form page, so a reply worth returning has to be read back from the log.
+UWEB_CONSOLE_PATH = "/ServerAdmin/current_console"
+UWEB_LOG_PATH = "/ServerAdmin/current_console_log"
+# Keep the reply to the recent tail: the log is cumulative, and only the lines a
+# command just produced are useful feedback.
+UWEB_LOG_TAIL = 12
+
+
+def _uweb_request(url: str, user: str, password: str, timeout: float, data: bytes | None) -> str:
+    """One authenticated request to the web admin; returns the decoded body.
+
+    Basic auth is set explicitly rather than via an opener/handler so a 401 is a
+    single clean HTTPError rather than a silent retry, and no realm negotiation is
+    needed. `data` selects POST vs GET.
+    """
+    request = urllib.request.Request(url, data=data)
+    token = base64.b64encode(f"{user}:{password}".encode("latin-1")).decode("ascii")
+    request.add_header("Authorization", f"Basic {token}")
+    if data is not None:
+        request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("latin-1", errors="replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise RconError("web admin rejected the credentials (401)") from exc
+        raise RconError(f"web admin returned HTTP {exc.code}") from exc
+    except urllib.error.URLError as exc:
+        raise RconError(f"cannot reach web admin at {url}: {exc.reason}") from exc
+
+
+# Page chrome in the log frame that carries no log content: the head (title + CSS),
+# scripts, styles, and the hidden status span the page copies into its parent frame.
+# Stripping these before splitting keeps JS/CSS text out of the returned reply.
+_UWEB_CHROME = re.compile(
+    r"<head\b.*?</head>|<script\b.*?</script>|<style\b.*?</style>"
+    r'|<span[^>]*display:\s*none[^>]*>.*?</span>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _uweb_parse_log(body: str) -> str:
+    r"""Reduce the console-log HTML to its recent event lines.
+
+    The frame renders each line as `&gt; (Type) text<br>`, several concatenated on
+    one physical line. Drop the page chrome, split on the breaks, strip tags, unescape
+    entities, and shed the `>` prompt — then keep the tail, the fresh lines a command
+    just produced rather than the whole session backlog.
+    """
+    body = _UWEB_CHROME.sub("", body)
+    lines: list[str] = []
+    for chunk in re.split(r"<br\s*/?>", body, flags=re.IGNORECASE):
+        text = html.unescape(re.sub(r"<[^>]+>", "", chunk)).strip()
+        text = text.lstrip("> ").strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines[-UWEB_LOG_TAIL:])
+
+
+def uweb_exec(host: str, port: int, password: str, command: str, timeout: float) -> str:
+    """Run one admin command through the Unreal Engine 1 web admin console.
+
+    The username is not part of the dispatch signature (which every transport shares),
+    so it is read from the environment here — the same shape as gamespy ignoring its
+    unused `password`. POST the command, then read the log frame back so the caller
+    gets the command's output, not the empty form the POST returns.
+    """
+    user = os.environ.get("RCON_WRITE_USER", "")
+    base = f"http://{host}:{port}"
+    payload = urllib.parse.urlencode({"SendText": command, "Send": "Send"}).encode("latin-1")
+    _uweb_request(base + UWEB_CONSOLE_PATH, user, password, timeout, payload)
+    log = _uweb_request(base + UWEB_LOG_PATH, user, password, timeout, None)
+    return _uweb_parse_log(log) or "(command sent; web admin returned no console output)"
+
+
 PROTOCOLS = {
     "goldsrc": goldsrc_exec,
     "source": source_exec,
     "q3": q3_exec,
     "zandronum": zandronum_exec,
     "gamespy": gamespy_exec,
+    "uweb": uweb_exec,
 }
 
 # Post-fetch reshapers, keyed by protocol. A handler returns the transport's reply as
@@ -444,38 +533,67 @@ def main() -> int:
         action="store_true",
         help="skip protocol normalization; return the transport reply verbatim",
     )
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="use the write transport (RCON_WRITE_*) for a state-changing command",
+    )
     parser.add_argument("--protocol", default=os.environ.get("RCON_PROTOCOL", "goldsrc"))
     parser.add_argument("--host", default=os.environ.get("RCON_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("RCON_PORT", "27015")))
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("RCON_TIMEOUT_SECONDS", "6")))
     args = parser.parse_args()
 
+    # A server may front two transports: a read path (RCON_*, e.g. gamespy queries)
+    # and an optional write path (RCON_WRITE_*, e.g. the uweb admin console). --write
+    # selects the latter; with no write transport configured it falls through to the
+    # read path, so a single-rcon game (goldsrc/source/...) writes over its one
+    # transport unchanged. UT99 is the case that needs the split: it reads on gamespy
+    # (7778, unauthenticated) but writes on uweb (5580, authenticated).
+    write_protocol = os.environ.get("RCON_WRITE_PROTOCOL")
+    if args.write and write_protocol:
+        protocol: str = write_protocol
+        host: str = os.environ.get("RCON_WRITE_HOST") or args.host
+        port: int = int(os.environ.get("RCON_WRITE_PORT") or args.port)
+        password: str = os.environ.get("RCON_WRITE_PASSWORD", "")
+        password_var = "RCON_WRITE_PASSWORD"
+    else:
+        protocol = args.protocol
+        host = args.host
+        port = args.port
+        password = os.environ.get("RCON_PASSWORD", "")
+        password_var = "RCON_PASSWORD"
+
     if args.info:
         print(f"service={os.environ.get('SERVICE_NAME', '?')}")
         print(f"protocol={args.protocol}")
         print(f"target={args.host}:{args.port}")
+        if write_protocol:
+            wport = os.environ.get("RCON_WRITE_PORT", str(args.port))
+            whost = os.environ.get("RCON_WRITE_HOST", args.host)
+            print(f"write_protocol={write_protocol}")
+            print(f"write_target={whost}:{wport}")
         return 0
 
     if not args.command:
         print("error: --command is required (or use --info)", file=sys.stderr)
         return 1
 
-    password = os.environ.get("RCON_PASSWORD", "")
-    if not password and args.protocol not in UNAUTHENTICATED_PROTOCOLS:
-        print("error: RCON_PASSWORD is not set in this container", file=sys.stderr)
+    if not password and protocol not in UNAUTHENTICATED_PROTOCOLS:
+        print(f"error: {password_var} is not set in this container", file=sys.stderr)
         return 1
 
-    handler = PROTOCOLS.get(args.protocol)
+    handler = PROTOCOLS.get(protocol)
     if handler is None:
         print(
-            f"error: unknown RCON_PROTOCOL {args.protocol!r}; expected one of {sorted(PROTOCOLS)}",
+            f"error: unknown protocol {protocol!r}; expected one of {sorted(PROTOCOLS)}",
             file=sys.stderr,
         )
         return 1
 
     try:
-        reply = handler(args.host, args.port, password, args.command, args.timeout)
-        normalize = NORMALIZERS.get(args.protocol)
+        reply = handler(host, port, password, args.command, args.timeout)
+        normalize = NORMALIZERS.get(protocol)
         if normalize is not None and not args.raw:
             reply = normalize(reply)
         print(reply)

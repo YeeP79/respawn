@@ -21,6 +21,23 @@ describe('parseTransportInfo', () => {
     const raw = '\nservice=cs16\nfuture_field=whatever\n';
     expect(parseTransportInfo(raw)).toEqual({ service: 'cs16' });
   });
+
+  it('reads a second write transport when the sidecar reports one (UT99)', () => {
+    const raw = [
+      'service=ut99',
+      'protocol=gamespy',
+      'target=127.0.0.1:7778',
+      'write_protocol=uweb',
+      'write_target=127.0.0.1:5580',
+    ].join('\n');
+    expect(parseTransportInfo(raw)).toEqual({
+      service: 'ut99',
+      protocol: 'gamespy',
+      target: '127.0.0.1:7778',
+      writeProtocol: 'uweb',
+      writeTarget: '127.0.0.1:5580',
+    });
+  });
 });
 
 describe('manifestSummary', () => {
