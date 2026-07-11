@@ -1,3 +1,5 @@
 packages:
   - apps/*
   - libs/*
+allowBuilds:
+  nx: set this to true or false

@@ -2,19 +2,5 @@
   "name": "respawn",
   "projectType": "application",
   "sourceRoot": "apps/respawn/src",
-  "tags": ["type:app", "lang:ts"],
-  "targets": {
-    "build-executor": {
-      "executor": "nx:run-commands",
-      "options": {
-        "command": "tsc --build apps/respawn/tsconfig.executor.json",
-        "cwd": "{workspaceRoot}"
-      }
-    },
-    "cdk": {
-      "executor": "@respawn/respawn:cdk",
-      "dependsOn": ["build-executor"],
-      "options": {}
-    }
-  }
+  "tags": ["type:app", "lang:ts"]
 }

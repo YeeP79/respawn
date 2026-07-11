@@ -8,8 +8,9 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
-import type { SecretRef } from '../config/types.js';
-import type { GameServerConfig } from '../config/types.js';
+import type { SecretRef } from '@respawn/core';
+import type { GameServerConfig } from '@respawn/core';
+import { clusterName, ecsServiceName, execAuditLogGroupName } from '@respawn/core';
 import { GameServerLogging } from './logging.js';
 import { GameServerNetworking } from './networking.js';
 import { GameServerEfsStorage } from './efs-storage.js';
@@ -54,7 +55,7 @@ export class GameServerFargateService extends Construct {
     let execLogGroup: logs.LogGroup | undefined;
     if (rconEnabled) {
       execLogGroup = new logs.LogGroup(this, 'ExecAuditLog', {
-        logGroupName: `/respawn/${config.environment}/${config.serviceName}/exec-audit`,
+        logGroupName: execAuditLogGroupName(config.environment, config.serviceName),
         retention: logs.RetentionDays.ONE_YEAR,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       });
@@ -70,7 +71,7 @@ export class GameServerFargateService extends Construct {
     // Cluster
     this.cluster = new ecs.Cluster(this, 'Cluster', {
       vpc: props.vpc,
-      clusterName: `respawn-${config.environment}-${config.serviceName}`,
+      clusterName: clusterName(config.environment, config.serviceName),
       enableFargateCapacityProviders: true,
       executeCommandConfiguration: execConfig,
     });
@@ -218,6 +219,20 @@ export class GameServerFargateService extends Construct {
           `rcon-control needs a SECRET_REFS entry named ${config.rconControl.passwordSecretVar}.`,
         );
       }
+
+      // Optional write transport: resolve its own secret from the same SECRET_REFS
+      // map. Loader validation guarantees it exists for an authenticated protocol.
+      const { writeProtocol, writePasswordSecretVar } = config.rconControl;
+      let writeSecret: ecs.Secret | undefined;
+      if (writeProtocol && writePasswordSecretVar) {
+        writeSecret = containerSecrets[writePasswordSecretVar];
+        if (!writeSecret) {
+          throw new Error(
+            `rcon-control write transport needs a SECRET_REFS entry named ${writePasswordSecretVar}.`,
+          );
+        }
+      }
+
       new RconControlSidecar(this, 'RconControl', {
         taskDefinition,
         logGroup: logging.logGroup,
@@ -226,6 +241,14 @@ export class GameServerFargateService extends Construct {
         rconPort:
           config.rconControl.port ?? config.networking.containerPort,
         serviceName: config.serviceName,
+        ...(writeProtocol ? { writeProtocol } : {}),
+        ...(config.rconControl.writePort !== undefined
+          ? { writePort: config.rconControl.writePort }
+          : {}),
+        ...(config.rconControl.writeUser !== undefined
+          ? { writeUser: config.rconControl.writeUser }
+          : {}),
+        ...(writeSecret ? { writeSecret } : {}),
       });
 
       // ECS Exec tunnels through SSM Messages; the task role needs these.
@@ -268,7 +291,7 @@ export class GameServerFargateService extends Construct {
     this.service = new ecs.FargateService(this, 'Service', {
       cluster: this.cluster,
       taskDefinition,
-      serviceName: `respawn-${config.environment}-${config.serviceName}`,
+      serviceName: ecsServiceName(config.environment, config.serviceName),
       desiredCount: config.scaling.desiredCount,
       securityGroups: [networking.securityGroup],
       assignPublicIp: config.networking.enablePublicAccess,

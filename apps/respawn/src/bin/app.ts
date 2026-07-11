@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
-import type { Environment } from '../config/types.js';
-import { loadConfig } from '../config/loader.js';
+import type { Environment } from '@respawn/core';
 import { SharedStack } from '../stacks/shared-stack.js';
 import { GameServerStack } from '../stacks/game-server-stack.js';
-import { discoverServices } from '../utils/stack-discovery.js';
-import * as path from 'node:path';
+import { discoverServices, sharedStackId, serviceStackId } from '@respawn/core';
 
 const app = new cdk.App();
 
@@ -35,12 +33,25 @@ const gameEnvOverrides: Record<string, string> = gameEnvOverridesRaw
   ? JSON.parse(gameEnvOverridesRaw)
   : {};
 
-// Load configs for each service
+// Resolve every service through discovery — the single source of truth for the
+// apps/ layout, including the variants/ layout. An id no longer has to be a real
+// apps/<id> directory (a variant lives at apps/<project>/variants/<v>/), so requested
+// names are matched against discovered service names rather than a path guess.
+const allDiscovered = discoverServices(workspaceRoot, environment);
+const byName = new Map(allDiscovered.map((s) => [s.name, s]));
+
+const requestedNames = new Set(serviceNames);
 const discoveredServices = serviceNames.map((name) => {
-  const servicePath = path.resolve(workspaceRoot, 'apps', name);
-  const config = loadConfig(servicePath, environment);
-  Object.assign(config.gameEnvVars, gameEnvOverrides);
-  return { name, path: servicePath, config };
+  const svc = byName.get(name);
+  if (!svc) {
+    throw new Error(
+      `Unknown service "${name}". Discovered: ${
+        allDiscovered.map((s) => s.name).join(', ') || '(none)'
+      }.`,
+    );
+  }
+  Object.assign(svc.config.gameEnvVars, gameEnvOverrides);
+  return svc;
 });
 
 // EVERY service stack must be synthesized on every run, even when deploying just
@@ -50,20 +61,14 @@ const discoveredServices = serviceNames.map((name) => {
 // CloudFormation refuses to remove an export that A's still-deployed stack imports
 // (the update rolls back). The `stacks` argument to `cdk deploy` still limits what
 // actually deploys — synthesizing all of them costs nothing.
-//
-// Requested services keep loud config errors (discoveredServices threw on load);
-// the rest come from discovery, which skips a broken .env with a warning.
-const requestedNames = new Set(serviceNames);
-const otherServices = discoverServices(workspaceRoot, environment).filter(
-  (s) => !requestedNames.has(s.name),
-);
+const otherServices = allDiscovered.filter((s) => !requestedNames.has(s.name));
 const allServices = [...discoveredServices, ...otherServices];
 
 const allEcrServices = allServices.filter((s) => !s.config.image.imageUri);
 const allImageUriServices = allServices.filter((s) => !!s.config.image.imageUri);
 
 // Shared stack (VPC, ECR repos) — a repo for every local-build service.
-const sharedStack = new SharedStack(app, `RespawnShared-${environment}`, {
+const sharedStack = new SharedStack(app, sharedStackId(environment), {
   environment,
   services: allEcrServices,
   env: {
@@ -79,7 +84,7 @@ for (const svc of allEcrServices) {
     throw new Error(`No ECR repo found for service: ${svc.name}`);
   }
 
-  const serviceStack = new GameServerStack(app, `Respawn-${environment}-${svc.name}`, {
+  const serviceStack = new GameServerStack(app, serviceStackId(environment, svc.name), {
     config: svc.config,
     vpc: sharedStack.vpc,
     ecrRepository: ecrRepo.repository,
@@ -97,7 +102,7 @@ for (const svc of allEcrServices) {
 
 // Per-service stacks — IMAGE_URI-based services (no ECR repo needed)
 for (const svc of allImageUriServices) {
-  const serviceStack = new GameServerStack(app, `Respawn-${environment}-${svc.name}`, {
+  const serviceStack = new GameServerStack(app, serviceStackId(environment, svc.name), {
     config: svc.config,
     vpc: sharedStack.vpc,
     imageUri: svc.config.image.imageUri,

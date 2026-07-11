@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../dist/apps/cli-test",
+    "tsBuildInfoFile": "../../dist/apps/cli-test/tsconfig.spec.tsbuildinfo",
+    "types": ["vitest/globals", "node"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.spec.ts", "src/**/*.test.ts"]
+}

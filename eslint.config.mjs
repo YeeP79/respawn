@@ -3,6 +3,11 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
+    // Never lint build output — the bundled MCP (dist/index.js) inlines dependencies
+    // whose own eslint-disable directives reference rules this config doesn't load.
+    ignores: ['**/dist/**', '**/node_modules/**'],
+  },
+  {
     plugins: {
       '@nx': nxPlugin,
     },

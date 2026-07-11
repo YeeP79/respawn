@@ -1,3 +1,4 @@
+import { logGroupName, type Environment } from '@respawn/core';
 import { runAwsJson, findServiceCluster, type AwsOpts } from './discovery.js';
 
 /**
@@ -515,8 +516,8 @@ export async function fetchLogs(
     limit?: number;
   } = {},
 ): Promise<{ logGroup: string; events: LogEvent[] }> {
-  const env = params.environment ?? 'dev';
-  const logGroup = `/respawn/${env}/${service}`;
+  const env = (params.environment ?? 'dev') as Environment;
+  const logGroup = logGroupName(env, service);
   const { start, end } = resolveWindow(params);
 
   const args = [

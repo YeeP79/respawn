@@ -3,9 +3,11 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "respawn-mcp": "./dist/index.js" },
+  "bin": { "respawn-mcp": "./dist/index.mjs" },
+  "main": "./dist/index.mjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@respawn/core": "workspace:*",
     "zod": "^3.24.1"
   }
 }

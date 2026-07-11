@@ -12,6 +12,9 @@ export interface TransportInfo {
   service?: string;
   protocol?: string;
   target?: string;
+  /** Write transport, when the sidecar fronts a separate write path (UT99: uweb). */
+  writeProtocol?: string;
+  writeTarget?: string;
 }
 
 /**
@@ -28,6 +31,8 @@ export function parseTransportInfo(raw: string): TransportInfo {
     if (key === 'service') info.service = value;
     else if (key === 'protocol') info.protocol = value;
     else if (key === 'target') info.target = value;
+    else if (key === 'write_protocol') info.writeProtocol = value;
+    else if (key === 'write_target') info.writeTarget = value;
   }
   return info;
 }

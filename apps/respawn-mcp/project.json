@@ -9,17 +9,22 @@
   "targets": {
     "build": {
       "dependsOn": [
-        "generate-manifests"
+        "generate-manifests",
+        "^build"
       ],
       "inputs": [
         "default",
         "^default",
         "gameManifests"
       ],
+      "outputs": [
+        "{projectRoot}/dist"
+      ],
+      "cache": true,
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc -p apps/respawn-mcp/tsconfig.build.json",
-        "cwd": "{workspaceRoot}"
+        "command": "npx tsdown",
+        "cwd": "{projectRoot}"
       }
     },
     "generate-manifests": {
