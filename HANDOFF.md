@@ -322,25 +322,36 @@ Bots for TFC: **FoxBot** (a Metamod plugin, so it rides the same Metamod; ships 
 - **GameSpy `\players\` lists humans only** (verified on ut99): bots never appear, and a
   player drops from the list while dead/respawning. It is a live snapshot, not a roster.
   An empty server's raw `players` reply is just the envelope: `\queryid\3.1\final\`.
-- **The UT99 UWeb console reaches the ENGINE exec chain ONLY — half our manifest was lying.**
-  `UTServerAdmin` runs `Level.ConsoleCommand(cmd)`, so only engine execs work. VERIFIED
-  against the real server (local roemer image, ground truth from its own console):
+- **The UT99 UWeb console gives NO FEEDBACK — "(command sent)" is never evidence.**
+  Pure garbage (`FLIBBERTIGIBBET`) returns the EXACT same
+  `"(command sent; web admin returned no console output)"` as `servertravel`, which we know
+  works. So a uweb command's reply proves nothing, for any command. **ALWAYS confirm by
+  effect** (a follow-up query). This is the single most important thing to know about ut99.
 
-  | Command | Works? | Why |
+  | Command | Status | Evidence |
   |---|:--:|---|
-  | `servertravel <map>?game=?mutator=` | ✅ | engine exec — the master lever |
-  | `set <Pkg.Class> <Prop> <val>` / `get` | ✅ | engine exec. **`get` reads back!** |
-  | `say <text>` | ✅ | special-cased in UTServerAdmin |
-  | `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` | ❌ | **`exec function`s on PlayerPawn.** The web console has NO PlayerPawn, so they dispatch nowhere. |
+  | `servertravel <map>?game=?mutator=` | ✅ PROVEN | map actually changes |
+  | `set <Pkg.Class> <Prop> <val>` / `get` | ✅ PROVEN | `get` reads the value back |
+  | `say <text>` | ✅ PROVEN | appears as `Admin:` in the console |
+  | `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` | ❓ **UNVERIFIED** | see below |
 
-  The killer detail: a broken one returns **"(command sent; web admin returned no console
-  output)"** — it reports SUCCESS and silently does nothing. `AddBots 4` left `numplayers=0`
-  and produced zero bot-joins in the server's console. Those five commands are now **REMOVED**
-  from `apps/ut99/variants/*/rcon-manifest.json` — a command that silently no-ops is worse
-  than an absent one, because an LLM will believe it worked.
-  **Do the same thing with cvars + `change_map` instead** (e.g. set `min_players`, then
-  change_map to fill with bots). Caveat: UE1 `set` writes the CLASS DEFAULT, so a cvar lands
-  on the NEXT map — pair it with a `change_map` to apply now.
+  The UT99 source says those five are `exec function`s on **PlayerPawn**, and the web console
+  has no PlayerPawn — so they *should* be no-ops (tellingly, UTServerAdmin implements its own
+  Kick by destroying the pawn directly rather than issuing a console `kick`). **But this could
+  NOT be confirmed**, and an earlier claim in this file that it *was* confirmed was wrong.
+  Why no test works:
+  - **Bots do not spawn on an empty server.** UT99 waits for a human before starting the match
+    (`NetWait`), so `AddBots` has nothing to show even if it dispatches fine.
+  - **GameSpy is blind to bots anyway** — neither `numplayers` nor `\players\` counts them
+    (independently confirmed: a human in the server saw bots while `numplayers` ignored them).
+  - **The console can't be probed** — garbage and valid commands return the same empty reply.
+
+  They are therefore KEPT in the manifest, flagged `"unverified": true` so the MCP warns rather
+  than silently lying. **To settle it: put a human in the server** (that starts the match and
+  spawns bots), then try `add_bots` / `kick_player` and watch in-game. That is the only test
+  that can work.
+  Meanwhile the cvar path IS proven: set `min_players`, then `change_map` to apply. Caveat: UE1
+  `set` writes the CLASS DEFAULT, so a cvar lands on the NEXT map.
 - **UT99 has two passwords.** `UT_ADMINPWD` → in-game admin; `UT_WEBADMINPWD` → the UWeb
   console on 5580. Set only the first and the webadmin keeps the image default `admin/admin`.
   Both now point at the same secret; keep it that way for any new UE1 game.

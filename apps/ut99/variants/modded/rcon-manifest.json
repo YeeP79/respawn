@@ -1,7 +1,7 @@
 {
   "displayName": "Unreal Tournament 99",
   "engine": "other",
-  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) \u2014 the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs. ADMIN SURFACE \u2014 VERIFIED AGAINST THE REAL SERVER, and narrower than it looks: the UWeb console runs `Level.ConsoleCommand`, which reaches the ENGINE exec chain only. `servertravel`, `set`/`get` and `say` (special-cased) work. Commands that are `exec function`s on PlayerPawn \u2014 Kick, AddBots, KillAll, Pause, Mutate \u2014 CANNOT work, because the web console has no PlayerPawn: they return 'command sent' and silently do nothing. They have been REMOVED from this manifest rather than left to lie. Use cvars + `change_map` instead (e.g. set `min_players` to fill with bots, then change_map). NOTE: UE1 `set` writes the CLASS DEFAULT, so a cvar takes effect on the NEXT map \u2014 pair it with change_map to apply it now.",
+  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) \u2014 the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs. ADMIN SURFACE \u2014 what is PROVEN vs what is NOT. The UWeb console runs `Level.ConsoleCommand`. PROVEN WORKING by observed effect: `servertravel` (map changes), `set`/`get` (value reads back), `say` (appears as 'Admin:'). UNVERIFIED: `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` \u2014 the UT99 source says these are `exec function`s on PlayerPawn and the web console has no PlayerPawn, so they may silently do nothing; but this could NOT be confirmed, because bots do not spawn on an empty server (UT99 waits for a human before starting the match) and GameSpy `numplayers`/`\\players\\` do not count bots anyway. They are kept, flagged `unverified`. \u26a0\ufe0f CRITICAL: the console gives NO feedback. A pure garbage command returns the SAME '(command sent; web admin returned no console output)' as `servertravel`. So that reply is NEVER evidence a command worked \u2014 ALWAYS confirm by effect (a follow-up query). NOTE: UE1 `set` writes the CLASS DEFAULT, so a cvar takes effect on the NEXT map \u2014 pair it with `change_map` to apply it now.",
   "modData": [
     {
       "name": "CustomCrossHairScale",
@@ -133,6 +133,36 @@
       }
     },
     {
+      "name": "kick_player",
+      "description": "Kick a player by name.",
+      "rcon": "kick {player}",
+      "args": {
+        "player": {
+          "description": "Exact player name as shown by the players query."
+        }
+      },
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "add_bots",
+      "description": "Add bots to the current match.",
+      "rcon": "AddBots {count}",
+      "args": {
+        "count": {
+          "description": "Number of bots to add.",
+          "type": "int"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "remove_bots",
+      "description": "Remove all bots from the current match.",
+      "rcon": "KillAll Bot",
+      "unverified": true
+    },
+    {
       "name": "say",
       "description": "Broadcast an admin message to everyone on the server (shown as 'Admin: <message>').",
       "rcon": "say {message}",
@@ -141,6 +171,23 @@
           "description": "Text to broadcast."
         }
       }
+    },
+    {
+      "name": "pause",
+      "description": "Toggle pause on the current match.",
+      "rcon": "Pause",
+      "unverified": true
+    },
+    {
+      "name": "mutate",
+      "description": "Send a raw server-side mutator command (mutator-specific; escape hatch for mods that expose a mutate verb).",
+      "rcon": "mutate {command}",
+      "args": {
+        "command": {
+          "description": "Mutator command and args, e.g. 'ch_scale 1'."
+        }
+      },
+      "unverified": true
     }
   ],
   "queries": [

@@ -34,6 +34,15 @@ const commandShape = {
   mod: z.string().optional(),
   /** Flag destructive actions so the LLM (and the operator) treat them carefully. */
   danger: z.boolean().optional(),
+  /**
+   * The command is DECLARED but never confirmed to take effect on this transport. Tell the
+   * user it may be a no-op and verify by effect (a follow-up query) — never trust the
+   * transport's reply.
+   *
+   * This exists because UT99's UWeb console returns the identical "(command sent)" string for
+   * a working command and for pure garbage, so "success" there is not evidence of anything.
+   */
+  unverified: z.boolean().optional(),
 } as const;
 
 export const CvarSchema = z.object({
