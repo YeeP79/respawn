@@ -71,7 +71,7 @@ server discovery. (An admin/power-user SSO role already covers these.)
 
 ```bash
 pnpm install
-npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
+npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.mjs
 ```
 
 ### 4. Point your MCP client at it
@@ -81,7 +81,7 @@ npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.js
   "mcpServers": {
     "respawn-rcon": {
       "command": "node",
-      "args": ["/absolute/path/to/repo/apps/respawn-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/repo/apps/respawn-mcp/dist/index.mjs"],
       "env": {
         "RESPAWN_PROFILE": "respawn",
         "RESPAWN_REGION": "us-east-1"

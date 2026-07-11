@@ -10,16 +10,16 @@ prints a URL + code you paste into the browser signed into the personal `d-90660
 portal. The token is short-lived and expires mid-session; re-run when a call reports
 `Token has expired`.
 
-**Branch `feat/ut99-uweb-variants` (off `main` `710a64a`), NOT pushed.** Five commits done
-(`a1c2b9b` → `c2c0217`), then an **in-progress tsdown conversion with uncommitted changes**.
-All servers scaled to 0 — nothing billing.
+**Branch `feat/ut99-uweb-variants` (off `main` `710a64a`), NOT pushed.** Six commits done
+(`a1c2b9b` → the tsdown conversion). Working tree clean. All servers scaled to 0 — nothing
+billing.
 
 ---
 
 ## ⚠️ RESUME HERE — this session's work (2026-07-10)
 
-Three big pieces landed on `feat/ut99-uweb-variants`, then a fourth (tsdown) is **mid-flight
-and uncommitted**. Read this before touching anything.
+Four big pieces landed on `feat/ut99-uweb-variants`. The tsdown conversion (the fourth) is
+now **done and committed** — the refactor arc is complete. Read this before touching anything.
 
 ### Committed (5 commits, verified green each time)
 
@@ -53,49 +53,51 @@ and uncommitted**. Read this before touching anything.
    `destroy` (gated by `RESPAWN_ALLOW_DEPLOYS`; `destroy` also needs `confirm=<name>`).
    Services resolved via core's filesystem discovery (`RESPAWN_WORKSPACE_ROOT`, default cwd).
 
-### IN PROGRESS — convert the whole workspace to tsdown build-to-dist (NOT committed)
+### DONE — whole workspace converted to tsdown build-to-dist (committed)
 
-**Why:** a `node`-run binary (the MCP, launched as `node dist/index.js` per its README /
-`.mcp.json`) **cannot consume the workspace's raw-TS package `exports`** (`"." → src/index.ts`).
-Only the tsx-run apps (cli, cdk) can. Phase 3 left a **stopgap** in the tree:
-`apps/respawn-mcp/build.mjs` (esbuild bundle + a `createRequire` banner) and a
-`build` target that runs it. **That is the hack being replaced.**
+**Why it existed:** a `node`-run binary (the MCP, `node dist/index.mjs`) **cannot consume the
+workspace's raw-TS package `exports`** (`"." → src/index.ts`); only tsx-run apps can. Phase 3
+left a stopgap — `apps/respawn-mcp/build.mjs` (esbuild bundle + `createRequire` banner). That
+hack is now **gone**.
 
-**Decision (user-approved):** full spartan-toolkit pattern — every package builds to `dist`
-via **tsdown**, `exports` point at built JS, plus a `development` condition so tsx apps keep
-zero-build dev. Reference: `~/Projects/work/active/spartan-toolkit`, esp.
-`hippeis/packages/hippeis-mcp` (tsdown.config: `entry`, `format:'esm'`, `target:'node24'`,
-`dts`, `deps.alwaysBundle:[/^@internal\//]`; `package.json` bin/main/types→dist, workspace
-libs in devDeps, npm deps external; `project.json` build = `npx tsdown`, `dependsOn:[typecheck,^build]`).
-`libs/utilities` is the plain-lib template (tsdown.config + `main:./dist/index.mjs`,
-`types:./src/index.ts`, build target `npx tsdown`).
+**What shipped (spartan-toolkit pattern):**
+- **tsdown** is a root devDep. `shared-types`, `docker-utils`, `core` each have a
+  `tsdown.config.ts` (esm/node24/`outDir dist`/`dts:false`, deps externalized), a
+  `package.json` `exports: { ".": { "development": "./src/index.ts", "types": "./src/index.ts", "import": "./dist/index.mjs" } }` + `main:./dist/index.mjs`,
+  and a `project.json` `build` target (`npx tsdown`, `cwd:{projectRoot}`, outputs `dist`,
+  `dependsOn ["^build"]`) overriding the `@nx/js/typescript` inferred one.
+- **`respawn-mcp` + `cli`** each got a `tsdown.config.ts` with `deps.alwaysBundle:[/^@respawn\//]`
+  — the whole `@respawn/*` graph (and its CJS transitive `dotenv`) is bundled inline; only each
+  app's own registry deps stay external (mcp: `@modelcontextprotocol/sdk`,`zod`; cli:
+  `@clack/prompts`,`chalk`). `bin`/`main → ./dist/index.mjs`. The entry files carry a single
+  `#!/usr/bin/env node` shebang (rolldown preserves it — **no banner**). `build.mjs`, the
+  `esbuild` devDep, and both apps' orphaned `tsconfig.build.json` are deleted.
+- **Zero-build dev preserved:** `pnpm respawn*` scripts and `apps/respawn/cdk.json` run
+  `tsx --conditions development …`, so the `development` export condition resolves libs to
+  `src` (verified: deleting `libs/core/dist` doesn't break `pnpm respawn`). **tsx honors
+  `--conditions development`** — confirmed empirically. Plain `node`/rolldown pick `import → dist`.
 
-**Remaining tasks (nx task list #22–#25):**
-- **#22** Add `tsdown` (root devDep). Give `shared-types`, `docker-utils`, `core` each a
-  `tsdown.config.ts` (esm/node24/dts/outDir dist, externalize deps), `package.json`
-  `exports: { ".": { "development": "./src/index.ts", "types": "./src/index.ts", "import": "./dist/index.mjs" } }` + `main`,
-  and a `project.json` `build` target (`npx tsdown`, outputs `dist`, `dependsOn ["^build"]`)
-  overriding the `@nx/js/typescript` inferred one.
-- **#23** Convert `respawn-mcp` to tsdown; **delete `build.mjs`** + the esbuild banner hack;
-  `bin/main/types → dist`. Verify `node dist/index.mjs` lists tools (probe below).
-- **#24** Add a tsdown build to `apps/cli`; make `pnpm respawn` + `apps/respawn/cdk.json` run
-  `tsx --conditions development …` so libs resolve to `src` (zero-build dev). Confirm tsx
-  honors `--conditions development`; if not, fall back to build-first.
-- **#25** Full `typecheck/lint/test/build` + runtime smoke; commit.
+**Verified:** `nx run-many -t typecheck lint test build` green for all 6 projects; bundled
+`node apps/respawn-mcp/dist/index.mjs` lists all 19 tools (incl. deploy/destroy/synth); `cdk
+list` stack names byte-stable.
 
-**Gotchas already hit this session (don't rediscover):**
-- Two shebangs → syntax error: source `#!/usr/bin/env node` + a banner shebang collide.
-- esbuild ESM bundling a CJS dep (dotenv) throws “Dynamic require of fs” — needs a
-  `createRequire` shim. **tsdown/rolldown handles this**, which is why we're switching.
-- **eslint must ignore `dist/`** — bundled deps carry their own disable directives.
-  `eslint.config.mjs` now has `{ ignores: ['**/dist/**','**/node_modules/**'] }`. Keep it.
-- `nx.json` has `sync.applyChanges: true` (auto-maintains tsconfig refs) — added this session.
+**Gotchas baked in (don't rediscover / don't undo):**
+- One shebang only. Source `#!/usr/bin/env node` + a banner shebang collide → syntax error.
+  tsdown/rolldown preserves the source shebang; there is no banner anymore.
+- esbuild ESM-bundling a CJS dep (dotenv) threw “Dynamic require of fs”. **tsdown/rolldown
+  handles the CJS interop** — that was the whole reason to switch.
+- **eslint must ignore `dist/`** — `eslint.config.mjs` has `{ ignores: ['**/dist/**','**/node_modules/**'] }`. Keep it.
+- The `development` exports condition MUST list `types:./src/index.ts` before `import`, else a
+  plain `tsc`/consumer resolves types to `dist` and needs a dts build first (we emit no dts).
+- `-e` one-liners can't resolve `@respawn/*` from the repo root (root package doesn't declare
+  them) — test the real app entry, not `tsx -e`.
+- `nx.json` has `sync.applyChanges: true` (auto-maintains tsconfig refs).
 - Cross-package imports resolve via pnpm-workspace `exports` (NO tsconfig `paths`).
 
 ### Verify commands
 ```bash
-npx nx run-many -t typecheck lint test build      # all 6 projects green before this session's tsdown work
-npx nx build respawn-mcp && node apps/respawn-mcp/dist/index.js   # must list tools incl. deploy/destroy/synth
+npx nx run-many -t typecheck lint test build      # all 6 projects green
+npx nx build respawn-mcp && node apps/respawn-mcp/dist/index.mjs  # must list tools incl. deploy/destroy/synth
 # MCP stdio tools/list + a gated deploy(ut99) probe: scratchpad mcp-probe.mjs / mcp-call.mjs
 cd apps/respawn && CDK_DEFAULT_ACCOUNT=000000000000 npx cdk list -c environment=dev \
   -c workspaceRoot=$PWD/../.. -c services=ut99,ut99-vanilla -c imageTag=t   # stack names byte-stable

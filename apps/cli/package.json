@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "respawn": "./dist/index.js"
+    "respawn": "./dist/index.mjs"
   },
   "dependencies": {
     "@clack/prompts": "^0.10.0",
