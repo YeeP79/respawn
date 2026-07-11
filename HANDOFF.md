@@ -150,6 +150,13 @@ servers, not just tests:
 - **ut99** (gamespy): `query server_info` and `query players` → parsed player rows, with a
   real human connected. GameSpy is read-only, so no `run_command`/`set_cvar`.
 - All four monitoring tools driven live; three also against a scaled-to-zero service.
+- **`scale`, `describe_transport`, `capture_raw`, `sample`** — all driven against ut99 on the
+  **rev-`:6`** sidecar (2026-07-11). `describe_transport` returned `reachable:true` + the live
+  dual-transport split (gamespy read `127.0.0.1:7778`, uweb write `127.0.0.1:5580`);
+  `capture_raw info` returned the raw wire payload
+  (`\hostname\Respawn UT99\mapname\CTF-Face\numplayers\0…`); `sample server_info.playerCount`
+  ×3 @3s → 0 misses. `scale` woke and slept it (CLI and MCP). **No MCP tool is unproven on the
+  exec path now.**
 
 ---
 
@@ -211,11 +218,9 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 
 ## Backlog
 
-1. **~~Redeploy a service to confirm `capture_raw`/`sample`/`describe_transport` live.~~**
-   ut99 redeployed 2026-07-10 with the new sidecar (task-def `:6`). The scale tool was proven
-   on it instead; the *exec* paths (`capture_raw`/`sample`/`describe_transport --info`, `--raw`)
-   are STILL unexercised against the live rev-`:6` sidecar — wake ut99 (`scale … --count 1`)
-   and drive them to finish closing this.
+1. **~~Redeploy a service to confirm `capture_raw`/`sample`/`describe_transport` live.~~ DONE.**
+   ut99 redeployed with the new sidecar (task-def `:6`) and all three exec paths driven against
+   it live — see "Proven end-to-end". Nothing in the MCP is unproven on the exec path now.
 2. **~~A scale/wake tool~~ — DONE.** `scale` core action → CLI `--action scale --count <n>` and
    gated MCP `scale` tool (`0`=sleep/`1`=wake), proven live on ut99 both ways. Closes the
    chicken-and-egg; the MCP can now start what it controls.
@@ -264,8 +269,15 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 - **Rapid back-to-back exec sessions drop the SSM control channel** (`TargetNotConnected`),
   and it does not recover on its own — stop the task and let the service replace it. The
   `sample` tool spaces its sessions (3s floor) for exactly this reason.
+- **`capture_raw` takes a RAW TRANSPORT TOKEN, not a manifest query name.** It sends the
+  string verbatim to the wire — that is the whole point (you use it to author a manifest, so
+  it cannot depend on one). On gamespy the tokens are `info, basic, rules, players, status,
+  echo`; `capture_raw players` works only because the manifest happens to reuse that name,
+  while `capture_raw server_info` fails (its raw token is `info`). The error helpfully lists
+  the valid tokens. `query` is the manifest-level counterpart.
 - **GameSpy `\players\` lists humans only** (verified on ut99): bots never appear, and a
   player drops from the list while dead/respawning. It is a live snapshot, not a roster.
+  An empty server's raw `players` reply is just the envelope: `\queryid\3.1\final\`.
 - **UT99 has two passwords.** `UT_ADMINPWD` → in-game admin; `UT_WEBADMINPWD` → the UWeb
   console on 5580. Set only the first and the webadmin keeps the image default `admin/admin`.
   Both now point at the same secret; keep it that way for any new UE1 game.
