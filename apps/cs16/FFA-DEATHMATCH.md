@@ -5,12 +5,22 @@ cs16 (Metamod + AMX Mod X + CSDM), kept apart from the vanilla server. It is **n
 shipped** — it hit a base-image incompatibility. Written up so the next attempt
 starts from the conclusion, not from scratch.
 
-## Goal
+> **Read this first — the mechanism has changed.** This was written when the only way to
+> ship a second build was to swap image tags on the one `cs16` service. cs16 is now a
+> **variant project**, so the FFA build is a *sibling service*, not a tag swap: it gets its
+> own `apps/cs16/variants/ffa/` (own `.env`, `Dockerfile`, `rcon-manifest.json`),
+> `SERVICE_NAME=cs16-ffa`, its own stack and ECR repo — and **vanilla keeps running the
+> whole time**. Adding it is purely additive; you never touch `variants/vanilla`.
+> The "Goal" below is superseded accordingly. Everything from **The blocker** down still
+> stands and is still the thing to solve.
 
-A second cs16 image, stored under its own tag in the same ECR repo, that runs CSDM
-free-for-all (respawns, per-map spawns, `csdm_ffa`). Vanilla cs16 unchanged; switch
-the running service to the FFA tag when wanted, switch back to go vanilla. Vanilla
-CS 1.6 has **no native deathmatch** — it requires the AMX Mod X + CSDM plugin stack.
+## Goal (superseded — see the note above)
+
+~~A second cs16 image, stored under its own tag in the same ECR repo… switch the running
+service to the FFA tag when wanted, switch back to go vanilla.~~ **Now:** a second
+*service*, `cs16-ffa`, running CSDM free-for-all (respawns, per-map spawns, `csdm_ffa`)
+alongside an untouched vanilla `cs16`. Vanilla CS 1.6 has **no native deathmatch** — it
+requires the AMX Mod X + CSDM plugin stack.
 
 ## What was assembled (and worked)
 
@@ -63,6 +73,44 @@ every AMXX server relies on. **The FFA variant needs a different, mod-capable ba
 Metamod-R + AMX Mod X + CSDM). Vanilla cs16 stays on `jives/hlds`; only the FFA
 image changes base. The AMX Mod X + CSDM assembly and wiring above can be reused
 verbatim once Metamod loads.
+
+**Two variants on two different base images is a solved shape here** — `apps/ut99` already
+does exactly that (`ut99` = roemer image, `ut99-vanilla` = bymatej image), which is the
+precedent to copy. The base-image swap this attempt needs is no longer a structural
+problem; it is now a one-directory change.
+
+## How to land it (the drop-in, once Metamod loads)
+
+Everything below is additive. `variants/vanilla` and the live `cs16` service are never
+touched, so a failed FFA build cannot take vanilla down.
+
+1. **Create `apps/cs16/variants/ffa/`** with four files:
+   - `.env.example` (tracked) and `.env` (gitignored) — start from `variants/vanilla/.env.example`
+     and change the identity + image deltas:
+     ```
+     SERVICE_NAME=cs16-ffa                       # suffix — the bare name is vanilla's
+     SERVICE_DISPLAY_NAME="Counter-Strike 1.6 — FFA Deathmatch"
+     CONTAINER_COMMAND=+log on +maxplayers 16 +map de_dust2 +sv_lan 0
+     SECRET_REFS=RCON_PASSWORD=sm:respawn/cs16-ffa/rcon    # its OWN secret path
+     GAME_ENV_SERVERNAME="Respawn CS 1.6 FFA"
+     ```
+     Shared knobs (ports, CPU, idle, `RCON_PROTOCOL=goldsrc`, AWS) are inherited from
+     `apps/cs16/.env` — do **not** repeat them.
+   - `Dockerfile` — `FROM` a **ReHLDS** base, then the AMX Mod X + CSDM assembly from the
+     table above. Build context is the **repo root**, so `COPY apps/cs16/...` paths (the
+     shim is shared: `COPY apps/cs16/respawn-init.sh`).
+   - `rcon-manifest.json` — copy vanilla's and add the CSDM/AMXX commands (`csdm_ffa`,
+     `amx_*`). Manifests are bundled into the MCP at build; no game redeploy to change one.
+2. **Create the secret before the first deploy** — ECS resolves `secrets:` *before* the
+   container starts, and CDK only synthesizes an ARN. A referenced-but-absent secret fails
+   the task with `ResourceInitializationError`:
+   ```bash
+   echo -n "$PW" | pnpm respawn --non-interactive --action secrets --service cs16-ffa --secret RCON_PASSWORD
+   ```
+3. **Add `cs16-ffa` to the `respawn:*` scripts** in the root `package.json` — they hardcode
+   an explicit `--service` list and a missing name is skipped **silently**.
+4. **Keep the local-run gate** below: `docker build` + `docker run` and grep the startup log
+   for the Metamod → AMX Mod X → CSDM chain *before* pushing to ECR.
 
 ## Validation method (why nothing broke)
 

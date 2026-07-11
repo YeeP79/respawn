@@ -21,13 +21,21 @@ const appsDir = join(here, '..');
 const selfName = 'respawn-mcp';
 
 /**
- * A variant's service name comes from its own .env SERVICE_NAME, else <project>-<variant>.
+ * A variant's service name comes from its own SERVICE_NAME, else <project>-<variant>.
  * Only that one key is needed, so it's read with a small regex rather than pulling
  * dotenv into this build tool (respawn-mcp has no dotenv dependency).
+ *
+ * `.env` is GITIGNORED, so it is absent in a fresh clone / CI — and reading only it meant
+ * a variant fell back to `<project>-<variant>` and mis-keyed the bundle: a deployed `ut99`
+ * (variant dir `modded`) got its manifest filed under `ut99-modded`, so `get_server_options
+ * ut99` found nothing. The MCP is routinely built where no `.env` exists (it needs AWS, not
+ * the .env files), so fall back to the TRACKED `.env.example`, which CLAUDE.md already
+ * requires be kept in sync with `.env`. Guessing from the directory name is the last resort.
  */
 function variantServiceName(projectName, variantName, variantDir) {
-  const envFile = join(variantDir, '.env');
-  if (existsSync(envFile)) {
+  for (const candidate of ['.env', '.env.example']) {
+    const envFile = join(variantDir, candidate);
+    if (!existsSync(envFile)) continue;
     const match = /^\s*SERVICE_NAME\s*=\s*(.+?)\s*$/m.exec(readFileSync(envFile, 'utf-8'));
     if (match) return match[1].replace(/^["']|["']$/g, '');
   }

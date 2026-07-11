@@ -3,9 +3,41 @@
 A GoldSrc/HLDS Counter-Strike 1.6 server. Light (256 CPU / 512 MB), UDP 27015,
 scales to zero when empty.
 
+## Layout: a variant project
+
+cs16 is a **variant project** — it is represented only by `variants/*`, never by this
+directory. `.env` here is the shared **base**; each variant layers its own `.env` on top
+and **wins on a key collision**. So the base holds what every cs16 build shares (ports,
+sizing, idle policy, rcon transport, AWS) and a variant holds only what makes it what it
+is (`SERVICE_NAME`, image, `CONTAINER_COMMAND`, `SECRET_REFS`).
+
+```
+apps/cs16/
+  .env / .env.example      # BASE — shared knobs
+  respawn-init.sh          # shim, shared by every variant (COPYed from the repo root)
+  variants/
+    vanilla/               # SERVICE_NAME=cs16      <- the canonical build, stock jives/hlds
+      .env / .env.example
+      Dockerfile
+      rcon-manifest.json
+```
+
+Identity is author-controlled via `SERVICE_NAME`. The canonical build keeps the **bare
+project name** (`cs16` → stack `respawn-dev-cs16`, ECR `respawn/cs16`); a sibling takes a
+suffix (`cs16-ffa`). Adding a variant is purely additive — it never touches the live
+vanilla service. See `apps/ut99` for a two-variant project that runs **two different base
+images**, which is exactly what a modded cs16 needs (see `FFA-DEATHMATCH.md`).
+
+Both files are needed to run it — `.env` is gitignored, so a fresh clone has none:
+
+```bash
+cp apps/cs16/.env.example apps/cs16/.env
+cp apps/cs16/variants/vanilla/.env.example apps/cs16/variants/vanilla/.env
+```
+
 ## Image: local build + shim
 
-`IMAGE_URI` is intentionally **unset**, so Respawn builds `Dockerfile` (from
+`IMAGE_URI` is intentionally **unset**, so Respawn builds the variant's `Dockerfile` (from
 `jives/hlds:cstrike`) and pushes it to ECR. The upstream entrypoint forwards
 `hlds_run` arguments **without `eval`**, so a secret referenced in
 `CONTAINER_COMMAND` would reach hlds as that literal string. Instead,
@@ -50,7 +82,7 @@ aws ecs execute-command --cluster respawn-dev-cs16 \
   --command "python3 /usr/local/bin/rcon.py --command 'status'" --profile respawn
 ```
 
-The MCP's manifest for this server lives in `rcon-manifest.json` (commands, the
+The MCP's manifest for this server lives in `variants/vanilla/rcon-manifest.json` (commands, the
 `players` query, tunable cvars).
 
 ## Networking defaults (the "click twice to fire" fix)
