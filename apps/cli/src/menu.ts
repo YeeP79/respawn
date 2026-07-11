@@ -108,6 +108,24 @@ export async function runCli(options: {
     selectedServiceNames.includes(svc.name),
   );
 
+  // Scale takes a single desired task count for the whole selection.
+  let scaleCount: number | undefined;
+  if (action === 'scale') {
+    const answer = await p.text({
+      message: 'Desired task count (0 = sleep, 1 = wake):',
+      placeholder: '1',
+      validate: (v) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n >= 0 ? undefined : 'Enter a non-negative integer.';
+      },
+    });
+    if (p.isCancel(answer)) {
+      p.cancel('Cancelled.');
+      return { success: false };
+    }
+    scaleCount = Number(answer);
+  }
+
   // Per-service deploy-time prompts (deploy action only). Answers are injected
   // as container env vars and threaded to the CDK app via context.
   const deployOverrides = new Map<string, Record<string, string>>();
@@ -138,6 +156,9 @@ export async function runCli(options: {
   p.log.message(
     `  Services:    ${selectedServices.map((s) => s.name).join(', ')}`,
   );
+  if (scaleCount !== undefined) {
+    p.log.message(`  Desired:     ${chalk.cyan(String(scaleCount))} (${scaleCount === 0 ? 'sleep' : 'wake'})`);
+  }
   for (const [svcName, overrides] of deployOverrides) {
     const pairs = Object.entries(overrides)
       .map(([k, v]) => `${k}=${v}`)
@@ -169,6 +190,7 @@ export async function runCli(options: {
       verbose: options.verbose,
       profile: options.profile,
       gameEnvOverrides: deployOverrides.get(service.name),
+      ...(scaleCount !== undefined ? { desiredCount: scaleCount } : {}),
     });
 
     results.push(result);

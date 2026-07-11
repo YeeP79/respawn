@@ -48,6 +48,7 @@ import {
   deploy as coreDeploy,
   push as corePush,
   destroy as coreDestroy,
+  scale as coreScale,
   type ActionResult,
   type DiscoveredService,
   type Environment,
@@ -775,6 +776,41 @@ server.registerTool(
       await coreDestroy({
         ...actionContext(resolveConfiguredService(service, environment), environment),
         force: true,
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'scale',
+  {
+    title: 'Scale a server (wake / sleep)',
+    description:
+      'Set a service\'s ECS desiredCount — wake a task (1) or sleep it (0) WITHOUT a ' +
+      'redeploy. This is the one thing the control tools cannot do on their own: they ' +
+      'drive a running task but cannot start one. Changes live infrastructure and billing, ' +
+      'so it is disabled unless RESPAWN_ALLOW_DEPLOYS=true. Returns immediately; reaching ' +
+      'RUNNING takes ~1–2 min — poll server_health for the task and its rcon-control agent.',
+    inputSchema: {
+      service: z.string(),
+      environment: environmentSchema,
+      desiredCount: z
+        .number()
+        .int()
+        .min(0)
+        .max(1)
+        .describe('0 = sleep (stop the task), 1 = wake (start one task).'),
+    },
+  },
+  async ({ service, environment, desiredCount }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Scaling is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy/scale.', true);
+    }
+    return actionResult(
+      await coreScale({
+        ...actionContext(resolveConfiguredService(service, environment), environment),
+        desiredCount,
+        region: REGION,
       }),
     );
   },

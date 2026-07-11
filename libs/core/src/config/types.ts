@@ -243,7 +243,8 @@ export type Action =
   | 'diff'
   | 'status'
   | 'push'
-  | 'updates';
+  | 'updates'
+  | 'scale';
 
 export interface ActionResult {
   success: boolean;

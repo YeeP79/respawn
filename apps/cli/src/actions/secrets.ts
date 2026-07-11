@@ -1,11 +1,57 @@
 import * as p from '@clack/prompts';
 import chalk from 'chalk';
 import type { DiscoveredService } from '@respawn/core';
-import { setSecret } from '@respawn/core';
+import { discoverServices, logger, setSecret } from '@respawn/core';
 
 export interface SecretsContext {
   services: DiscoveredService[];
   profile?: string;
+}
+
+/**
+ * Non-interactive counterpart to {@link runSecrets}: sets one declared secret from a
+ * value the caller already read off stdin (never argv). Returns a process exit code.
+ * Discovery is env-agnostic — SECRET_REFS do not vary by environment — so 'dev' is used.
+ */
+export async function runSecretsBatch(opts: {
+  workspaceRoot: string;
+  service: string;
+  secret: string;
+  value: string;
+  profile?: string;
+}): Promise<number> {
+  const services = discoverServices(opts.workspaceRoot, 'dev');
+  const service = services.find((s) => s.name === opts.service);
+  if (!service) {
+    logger.error(
+      `Service "${opts.service}" not found. Available: ${services.map((s) => s.name).join(', ') || '(none)'}`,
+    );
+    return 1;
+  }
+
+  const ref = service.config.secretRefs.find((r) => r.containerEnvVar === opts.secret);
+  if (!ref) {
+    const declared = service.config.secretRefs.map((r) => r.containerEnvVar).join(', ') || '(none)';
+    logger.error(`Service "${opts.service}" declares no secret "${opts.secret}". Declared: ${declared}`);
+    return 1;
+  }
+
+  try {
+    await setSecret({
+      store: ref.store,
+      sourceId: ref.sourceId,
+      value: opts.value,
+      region: service.config.aws.region,
+      profile: opts.profile ?? service.config.aws.profile,
+    });
+    logger.info(`Stored ${ref.store}:${ref.sourceId} (${opts.service}/${opts.secret})`);
+    return 0;
+  } catch (err) {
+    logger.error(
+      `Failed to set ${ref.store}:${ref.sourceId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return 1;
+  }
 }
 
 /**

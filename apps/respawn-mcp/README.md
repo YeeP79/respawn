@@ -94,23 +94,27 @@ npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.mjs
 `RESPAWN_PROFILE` / `RESPAWN_REGION` fall back to `AWS_PROFILE` / `AWS_REGION`,
 then to `us-east-1`.
 
-**Lifecycle tools (deploy/destroy/synth/diff/push/check_updates).** Beyond controlling
+**Lifecycle tools (deploy/destroy/synth/diff/push/check_updates/scale).** Beyond controlling
 running servers, the MCP shares the CLI's deploy engine (`@respawn/core`). These tools
 read the repo, so set `RESPAWN_WORKSPACE_ROOT` to the repo root when the MCP runs
-elsewhere (defaults to the process cwd). The mutating ones — `deploy`, `push`, `destroy`
-— are disabled unless `RESPAWN_ALLOW_DEPLOYS=true`, and `destroy` additionally requires
-passing `confirm=<service name>`. `synth`, `diff`, and `check_updates` are read-only and
-always available.
+elsewhere (defaults to the process cwd). The mutating ones — `deploy`, `push`, `destroy`,
+`scale` — are disabled unless `RESPAWN_ALLOW_DEPLOYS=true`, and `destroy` additionally
+requires passing `confirm=<service name>`. `synth`, `diff`, and `check_updates` are
+read-only and always available. **`scale`** sets a service's ECS `desiredCount`
+(`0`=sleep, `1`=wake) without a redeploy — the way to start the very task the control
+tools then reach; it returns immediately and the task is RUNNING in ~1–2 min.
 
 ### 5. The server must be deployed with the sidecar
 
 The MCP can only reach a server whose task carries the `rcon-control` sidecar,
 which means the service was deployed with **`ENABLE_RCON_CONTROL=true`** (this
 flips `enableExecuteCommand` and adds the container). A server without it — or one
-scaled to zero — will not appear in `list_servers`. Deploy or wake it first:
+scaled to zero — will not appear in `list_servers`. Wake it first (no redeploy needed):
 
 ```bash
-pnpm respawn:deploy   # or: aws ecs update-service … --desired-count 1
+# MCP: scale {service, environment, desiredCount:1}   (RESPAWN_ALLOW_DEPLOYS=true)
+# CLI: respawn --non-interactive --action scale --service <svc> --environment dev --count 1
+pnpm respawn:deploy   # or a full (re)deploy, which re-asserts the configured desiredCount
 ```
 
 ### Quick check

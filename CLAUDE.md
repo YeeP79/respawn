@@ -22,7 +22,7 @@ never set `CI=true` to force it, which silently wipes `node_modules`:
 npx nx run-many -t typecheck        # same target, no dep-status check
 ```
 
-**Deployment CLI** (interactive Clack menu — deploy, diff, synth, status, destroy, secrets):
+**Deployment CLI** (interactive Clack menu — deploy, diff, synth, status, scale, destroy, secrets):
 
 ```bash
 pnpm respawn                        # requires: aws sso login --profile respawn
@@ -107,8 +107,10 @@ consumer reads discovery output, so a variant is a first-class service everywher
    See `apps/gmod`, `apps/css` (LinuxGSM), `apps/cs16` (HLDS).
 
 **Secrets.** `SECRET_REFS` → ECS `secrets:` (never `environment:`). Set values with the
-`Secrets` CLI action, which writes to Secrets Manager / SSM over stdin. Naming:
-`respawn/<service>/<name>` (sm), `/respawn/<service>/<name>` (ssm).
+`Secrets` CLI action, which writes to Secrets Manager / SSM over stdin. Interactive via
+`pnpm respawn` → Secrets; headless (for automation) pipes the value on stdin — never argv:
+`echo -n "$VALUE" | respawn --non-interactive --action secrets --service <svc> --secret <ENV_VAR>`.
+Naming: `respawn/<service>/<name>` (sm), `/respawn/<service>/<name>` (ssm).
 Full spec: `artifacts/AGENT_PROMPT.md` §7.
 
 ---

@@ -8,3 +8,4 @@ export * from './synth.js';
 export * from './status.js';
 export * from './push.js';
 export * from './updates.js';
+export * from './scale.js';

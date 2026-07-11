@@ -109,11 +109,13 @@ Local UT99 image checks used `docker run roemer/ut99-server` / `bymatej/ut99-ser
 
 ## What the MCP can and cannot do
 
-It **controls and observes** servers. It **cannot create, deploy, scale, or wake** them —
-there is no such tool. Deploying is the CLI's job (`pnpm respawn`, or `nx run respawn:cdk`).
-This matters: the game-facing tools need a *running task*, and the MCP cannot produce one.
+It **controls and observes** servers, and — as of the scale tool — can **wake and sleep**
+them. It still does **not create or tear down** infrastructure interactively; deploy/destroy
+are gated (`RESPAWN_ALLOW_DEPLOYS=true`) and building images is the CLI's job. The
+game-facing control tools need a *running task*; `scale` (gated) is now how the MCP produces
+one without a redeploy — the old chicken-and-egg (backlog #2) is closed.
 
-Thirteen tools. Which need a live task:
+**20 tools.** Control/observe (13) need a live task where noted:
 
 | Tool | Live task? | Purpose |
 |------|:---:|---------|
@@ -128,6 +130,11 @@ Thirteen tools. Which need a live task:
 | `capture_raw` | yes | unparsed transport reply, for authoring a manifest |
 | `sample` | yes | run a query N times, report how a field moves |
 | `container_stats` | yes (1 exec/call) | live per-container cpu/rss/cache/usage |
+
+Lifecycle (7), all gated by `RESPAWN_ALLOW_DEPLOYS=true` except the read-only first three:
+`synth`, `diff`, `check_updates` (read) · `deploy`, `push`, `destroy` (destroy also needs
+`confirm=<name>`) · **`scale`** — set ECS `desiredCount` (`0`=sleep, `1`=wake); returns
+immediately, task reaches RUNNING in ~1–2 min (poll `server_health`).
 
 ---
 
@@ -177,11 +184,19 @@ tfc; `respawn/rust/rcon-password`, `respawn/ut99/admin-pwd`, `respawn/valheim/se
 aws sso login --profile respawn --use-device-code
 npx nx build respawn-mcp          # dist/ is gitignored — a fresh clone has none
 
-# The MCP cannot wake a server. Wake one yourself, then scale it back to 0 when done:
-aws ecs update-service --cluster respawn-dev-<svc> --service respawn-dev-<svc> \
-  --desired-count 1 --profile respawn
+# Wake a server (pick ONE), then sleep it (count 0) when done:
+#   MCP tool:  scale {service, environment, desiredCount:1}   (needs RESPAWN_ALLOW_DEPLOYS=true)
+#   CLI:       tsx --conditions development apps/cli/src/index.ts --non-interactive \
+#                --action scale --service <svc> --environment dev --count 1 --profile respawn
+#   raw:       aws ecs update-service --cluster respawn-dev-<svc> --service respawn-dev-<svc> \
+#                --desired-count 1 --profile respawn
 # wait for lastStatus=RUNNING and the rcon-control managed agent RUNNING before exec tools
 ```
+
+**A `deploy` re-asserts the stack's configured `desiredCount` (1 for ut99), so deploying a
+service wakes it.** Use `scale … --count 0` to sleep it afterward — that is what keeps the
+fleet at 0. `scale` never rebuilds or touches CloudFormation; it is a plain
+`ecs update-service`.
 
 The game gets a fresh **public IP on every task start** (no stable DNS — see backlog). Pull
 it from the task's ENI: `attachments[0].details[networkInterfaceId]` →
@@ -196,11 +211,14 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 
 ## Backlog
 
-1. **Redeploy a service to confirm `capture_raw`/`sample`/`describe_transport` live.** They
-   ship unproven on the exec path. ut99 is the cheapest (no image build). This also proves
-   the `--raw` split end-to-end.
-2. **A scale/wake tool** would close the chicken-and-egg (MCP can't start what it controls).
-   The single most obvious gap; also unblocks self-contained testing.
+1. **~~Redeploy a service to confirm `capture_raw`/`sample`/`describe_transport` live.~~**
+   ut99 redeployed 2026-07-10 with the new sidecar (task-def `:6`). The scale tool was proven
+   on it instead; the *exec* paths (`capture_raw`/`sample`/`describe_transport --info`, `--raw`)
+   are STILL unexercised against the live rev-`:6` sidecar — wake ut99 (`scale … --count 1`)
+   and drive them to finish closing this.
+2. **~~A scale/wake tool~~ — DONE.** `scale` core action → CLI `--action scale --count <n>` and
+   gated MCP `scale` tool (`0`=sleep/`1`=wake), proven live on ut99 both ways. Closes the
+   chicken-and-egg; the MCP can now start what it controls.
 3. **Stable address.** Task public IP changes on every start — the worst property for a game
    server. Proportionate fix: EventBridge on ECS task-state-change → Lambda → Route53 A
    record. Nearly free. An NLB would cost more than the whole fleet; don't.

@@ -17,6 +17,10 @@ export interface BatchOptions {
   dryRun?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
+  /** ECS desiredCount — required when action is `scale`. */
+  desiredCount?: number;
+  /** Deploy-time env overrides (deploy-prompt answers), applied to every service. */
+  gameEnvOverrides?: Record<string, string>;
 }
 
 /**
@@ -25,6 +29,11 @@ export interface BatchOptions {
  * source of truth for service names, so an unknown name fails fast.
  */
 export async function runBatch(options: BatchOptions): Promise<number> {
+  if (options.action === 'scale' && options.desiredCount === undefined) {
+    logger.error('The scale action requires --count <n> (0 to sleep, 1 to wake).');
+    return 1;
+  }
+
   const serviceNames = options.service
     .split(',')
     .map((s) => s.trim())
@@ -56,6 +65,8 @@ export async function runBatch(options: BatchOptions): Promise<number> {
       requireImage: options.requireImage,
       record: options.record,
       requireApproval: options.requireApproval ?? 'never',
+      ...(options.desiredCount !== undefined ? { desiredCount: options.desiredCount } : {}),
+      ...(options.gameEnvOverrides ? { gameEnvOverrides: options.gameEnvOverrides } : {}),
     });
 
     results.push(result);

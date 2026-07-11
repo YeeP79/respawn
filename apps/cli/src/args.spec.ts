@@ -67,4 +67,40 @@ describe('parseCliArgs', () => {
   it('rejects an unknown flag', () => {
     expect(() => parseCliArgs(['--wat'], ROOT)).toThrow();
   });
+
+  it('accepts scale and secrets as actions', () => {
+    expect(parseCliArgs(['--action', 'scale'], ROOT).action).toBe('scale');
+    expect(parseCliArgs(['--action', 'secrets'], ROOT).action).toBe('secrets');
+  });
+
+  it('parses --count into a non-negative integer', () => {
+    expect(parseCliArgs(['--count', '0'], ROOT).count).toBe(0);
+    expect(parseCliArgs(['--count', '1'], ROOT).count).toBe(1);
+    expect(parseCliArgs([], ROOT).count).toBeUndefined();
+  });
+
+  it('rejects a negative or non-integer --count', () => {
+    // A dash-prefixed value must use the =form; node's parseArgs rejects `--count -1`.
+    expect(() => parseCliArgs(['--count=-1'], ROOT)).toThrow(/Invalid --count/);
+    expect(() => parseCliArgs(['--count', '1.5'], ROOT)).toThrow(/Invalid --count/);
+    expect(() => parseCliArgs(['--count', 'lots'], ROOT)).toThrow(/Invalid --count/);
+  });
+
+  it('carries --secret through for the headless secrets flow', () => {
+    expect(parseCliArgs(['--secret', 'RCON_PASSWORD'], ROOT).secret).toBe('RCON_PASSWORD');
+  });
+
+  it('collects repeated --game-env into a map', () => {
+    const a = parseCliArgs(['--game-env', 'MAP=dm', '--game-env', 'MODE=ffa'], ROOT);
+    expect(a.gameEnv).toEqual({ MAP: 'dm', MODE: 'ffa' });
+  });
+
+  it('accepts an = in a --game-env value', () => {
+    expect(parseCliArgs(['--game-env', 'ARGS=-a=1'], ROOT).gameEnv).toEqual({ ARGS: '-a=1' });
+  });
+
+  it('rejects a malformed --game-env entry', () => {
+    expect(() => parseCliArgs(['--game-env', 'NOPE'], ROOT)).toThrow(/Expected KEY=VALUE/);
+    expect(() => parseCliArgs(['--game-env', '=novalue'], ROOT)).toThrow(/Expected KEY=VALUE/);
+  });
 });
