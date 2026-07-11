@@ -322,6 +322,25 @@ Bots for TFC: **FoxBot** (a Metamod plugin, so it rides the same Metamod; ships 
 - **GameSpy `\players\` lists humans only** (verified on ut99): bots never appear, and a
   player drops from the list while dead/respawning. It is a live snapshot, not a roster.
   An empty server's raw `players` reply is just the envelope: `\queryid\3.1\final\`.
+- **The UT99 UWeb console reaches the ENGINE exec chain ONLY — half our manifest was lying.**
+  `UTServerAdmin` runs `Level.ConsoleCommand(cmd)`, so only engine execs work. VERIFIED
+  against the real server (local roemer image, ground truth from its own console):
+
+  | Command | Works? | Why |
+  |---|:--:|---|
+  | `servertravel <map>?game=?mutator=` | ✅ | engine exec — the master lever |
+  | `set <Pkg.Class> <Prop> <val>` / `get` | ✅ | engine exec. **`get` reads back!** |
+  | `say <text>` | ✅ | special-cased in UTServerAdmin |
+  | `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` | ❌ | **`exec function`s on PlayerPawn.** The web console has NO PlayerPawn, so they dispatch nowhere. |
+
+  The killer detail: a broken one returns **"(command sent; web admin returned no console
+  output)"** — it reports SUCCESS and silently does nothing. `AddBots 4` left `numplayers=0`
+  and produced zero bot-joins in the server's console. Those five commands are now **REMOVED**
+  from `apps/ut99/variants/*/rcon-manifest.json` — a command that silently no-ops is worse
+  than an absent one, because an LLM will believe it worked.
+  **Do the same thing with cvars + `change_map` instead** (e.g. set `min_players`, then
+  change_map to fill with bots). Caveat: UE1 `set` writes the CLASS DEFAULT, so a cvar lands
+  on the NEXT map — pair it with a `change_map` to apply now.
 - **UT99 has two passwords.** `UT_ADMINPWD` → in-game admin; `UT_WEBADMINPWD` → the UWeb
   console on 5580. Set only the first and the webadmin keeps the image default `admin/admin`.
   Both now point at the same secret; keep it that way for any new UE1 game.

@@ -39,7 +39,7 @@ import {
   manifestedServices,
   resolveCapabilities,
 } from './capabilities.js';
-import { resolveWireCommand } from './manifest.js';
+import { resolveCvarCommand, resolveWireCommand } from './manifest.js';
 import { runQuery } from './query-engine.js';
 import {
   discoverServices,
@@ -344,7 +344,12 @@ server.registerTool(
       value: z.string().describe('New value'),
     },
   },
-  async ({ service, cvar, value }) => runAndFormat(service, `${cvar} "${value}"`, { write: true }),
+  async ({ service, cvar, value }) =>
+    // A Quake-family console takes `<name> "<value>"`; a manifest may override per-cvar for
+    // a console that works differently (UE1: `set <Package.Class> <Prop> <value>`).
+    runAndFormat(service, resolveCvarCommand(getManifest(service), cvar, value), {
+      write: true,
+    }),
 );
 
 server.registerTool(
