@@ -139,3 +139,26 @@ export function parseManifest(
   const parsed = makeManifestSchema(modDataSchema).parse(raw);
   return { ...parsed, service: parsed.service ?? serviceName } as Manifest;
 }
+
+/**
+ * The string to put on the wire for a raw capture.
+ *
+ * A declared query NAME resolves to its transport token (`server_info` -> `info`) — that
+ * mapping already lives in the manifest's `rcon` field, and making the caller know it
+ * defeats the point: `capture_raw server_info` used to fail while `capture_raw players`
+ * worked, purely because the latter's name happens to equal its token.
+ *
+ * Anything that is not a declared query name passes through VERBATIM, which is what keeps
+ * `capture_raw` usable against a server that has no manifest yet — its entire purpose. So
+ * raw tokens (`info`, `basic`, `status`) still work untouched.
+ *
+ * A manifest name wins over a same-spelled raw token. That is the right precedence (the
+ * manifest is the service's declared surface) and is a no-op in practice: a query named
+ * `players`/`rules` maps to exactly that token anyway.
+ */
+export function resolveWireCommand(
+  manifest: Manifest | undefined,
+  command: string,
+): string {
+  return manifest?.queries.find((q) => q.name === command)?.rcon ?? command;
+}

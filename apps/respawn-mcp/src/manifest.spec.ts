@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { parseManifest } from './manifest.js';
+import { parseManifest, resolveWireCommand } from './manifest.js';
 import { parseMapList } from './capabilities.js';
 import { MOD_DATA_SCHEMAS } from './mod-data.js';
 
@@ -159,5 +159,41 @@ describe('parseMapList', () => {
 
   it('returns empty for an empty reply', () => {
     expect(parseMapList('')).toEqual([]);
+  });
+});
+
+describe('resolveWireCommand', () => {
+  const manifest = parseManifest(
+    {
+      queries: [
+        { name: 'server_info', description: 'info', rcon: 'info', singles: { map: '^mapname=(.*)$' } },
+        { name: 'players', description: 'players', rcon: 'players', singles: {} },
+        { name: 'rules', description: 'rules', rcon: 'rules', singles: {} },
+      ],
+    },
+    'ut99',
+  );
+
+  it('resolves a declared query name to its transport token', () => {
+    // The regression: capture_raw server_info used to go on the wire as "server_info"
+    // and be rejected, because its raw gamespy token is "info".
+    expect(resolveWireCommand(manifest, 'server_info')).toBe('info');
+  });
+
+  it('is a no-op when a query name equals its token', () => {
+    expect(resolveWireCommand(manifest, 'players')).toBe('players');
+    expect(resolveWireCommand(manifest, 'rules')).toBe('rules');
+  });
+
+  it('passes an undeclared raw token through verbatim', () => {
+    // Keeps capture_raw usable for authoring against an unfamiliar server.
+    expect(resolveWireCommand(manifest, 'info')).toBe('info');
+    expect(resolveWireCommand(manifest, 'basic')).toBe('basic');
+    expect(resolveWireCommand(manifest, 'status')).toBe('status');
+  });
+
+  it('passes everything through when the service has no manifest', () => {
+    expect(resolveWireCommand(undefined, 'status')).toBe('status');
+    expect(resolveWireCommand(undefined, 'server_info')).toBe('server_info');
   });
 });

@@ -39,6 +39,7 @@ import {
   manifestedServices,
   resolveCapabilities,
 } from './capabilities.js';
+import { resolveWireCommand } from './manifest.js';
 import { runQuery } from './query-engine.js';
 import {
   discoverServices,
@@ -381,12 +382,19 @@ server.registerTool(
       service: z.string(),
       command: z
         .string()
-        .describe('Query or command to send verbatim, e.g. "players" or "status"'),
+        .describe(
+          'A declared query name (e.g. "server_info") — resolved to its raw transport ' +
+            'token via the manifest — or, for a server with no manifest, a raw token to ' +
+            'send verbatim (e.g. gamespy "info"/"status", goldsrc "status").',
+        ),
     },
   },
   async ({ service, command }) => {
+    // A declared query name resolves to its wire token; anything else goes verbatim, so an
+    // unfamiliar/manifest-less server can still be probed. See resolveWireCommand.
+    const wire = resolveWireCommand(getManifest(service), command);
     const target = await resolveTarget(service);
-    const result = await execRcon(target, command, undefined, { raw: true });
+    const result = await execRcon(target, wire, undefined, { raw: true });
     if (result.exitCode !== 0) {
       return textResult(`capture failed on ${service}:\n${result.output || '(no output)'}`, true);
     }

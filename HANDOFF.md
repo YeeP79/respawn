@@ -147,8 +147,11 @@ servers, not just tests:
 - **cs16** (goldsrc): `rcon stats` returned a live server table — first goldsrc rcon
   through the MCP.
 - **tfc** (goldsrc): `query players` → structured rows after fixing its map (see below).
-- **ut99** (gamespy): `query server_info` and `query players` → parsed player rows, with a
-  real human connected. GameSpy is read-only, so no `run_command`/`set_cvar`.
+- **ut99** (gamespy read + uweb write): `query server_info` / `query players` → parsed rows,
+  with a real human connected. **Writes proven live too:** `run_command change_map CTF-Coret`
+  over the uweb console flipped the deployed server `CTF-Face → CTF-Coret`, confirmed by a
+  follow-up `server_info` on the *read* transport. GameSpy itself is read-only — the writes
+  go over UWeb on 5580, which is the whole point of the two-transport split.
 - All four monitoring tools driven live; three also against a scaled-to-zero service.
 - **`scale`, `describe_transport`, `capture_raw`, `sample`** — all driven against ut99 on the
   **rev-`:6`** sidecar (2026-07-11). `describe_transport` returned `reachable:true` + the live
@@ -231,9 +234,10 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
    (WebSocket rcon), 7dtd (telnet), quakelive (idTech3 but rcon differs from classic q3 —
    unconfirmed), valheim (no rcon). Author these with `capture_raw` now that it exists.
    7dtd telnet is the easiest.
-5. **ut99 writes** (kick/say/map) live behind the UWeb admin on 5580, a separate HTTP
-   transport from the read-only gamespy query port. Would need a `webadmin` protocol in
-   `rcon.py`.
+5. **~~ut99 writes~~ — DONE.** The `uweb` transport is in `rcon.py` and is now proven against
+   the *deployed* task (not just a local image): `run_command change_map` moved the live
+   server `CTF-Face → CTF-Coret`. Reads stay on gamespy (7778), writes go to the UWeb console
+   (5580). **ut99 is feature-complete** — read, write, and scale all verified live.
 6. **doom2 has no queries** — `query` can't report who's on it. A `players` query needs its
    zandronum status parse authored.
 7. **Mod commands** — manifests declare none yet (ULX, SourceMod, AMX Mod X). First-class in
@@ -269,12 +273,13 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 - **Rapid back-to-back exec sessions drop the SSM control channel** (`TargetNotConnected`),
   and it does not recover on its own — stop the task and let the service replace it. The
   `sample` tool spaces its sessions (3s floor) for exactly this reason.
-- **`capture_raw` takes a RAW TRANSPORT TOKEN, not a manifest query name.** It sends the
-  string verbatim to the wire — that is the whole point (you use it to author a manifest, so
-  it cannot depend on one). On gamespy the tokens are `info, basic, rules, players, status,
-  echo`; `capture_raw players` works only because the manifest happens to reuse that name,
-  while `capture_raw server_info` fails (its raw token is `info`). The error helpfully lists
-  the valid tokens. `query` is the manifest-level counterpart.
+- **`capture_raw` accepts EITHER a declared query name or a raw transport token** — it
+  resolves a manifest query name to its `rcon` token (`server_info` → gamespy `info`) and
+  passes anything else through verbatim, so a manifest-less server can still be probed.
+  (It used to send everything verbatim, so `capture_raw server_info` failed while
+  `capture_raw players` worked — purely because the latter's name equals its token. Fixed in
+  `resolveWireCommand`; unit-tested.) Gamespy's raw tokens: `info, basic, rules, players,
+  status, echo`.
 - **GameSpy `\players\` lists humans only** (verified on ut99): bots never appear, and a
   player drops from the list while dead/respawning. It is a live snapshot, not a roster.
   An empty server's raw `players` reply is just the envelope: `\queryid\3.1\final\`.
