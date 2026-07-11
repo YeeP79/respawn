@@ -74,12 +74,26 @@ function parseCheckMethod(
   return undefined;
 }
 
-const RCON_PROTOCOLS = ['goldsrc', 'source', 'q3', 'zandronum', 'gamespy', 'uweb'] as const;
+const RCON_PROTOCOLS = [
+  'goldsrc',
+  'source',
+  'q3',
+  'zandronum',
+  'zandronum-query',
+  'gamespy',
+  'uweb',
+] as const;
 
 // Protocols that carry no credentials — a password requirement makes no sense for them.
 // Kept in sync with rcon.py's UNAUTHENTICATED_PROTOCOLS; the write-transport validation
 // below uses it to decide when a password secret is mandatory.
-const UNAUTHENTICATED_PROTOCOLS: readonly RconProtocol[] = ['gamespy'];
+const UNAUTHENTICATED_PROTOCOLS: readonly RconProtocol[] = ['gamespy', 'zandronum-query'];
+
+// Protocols that authenticate with a USERNAME as well as a password. Only uweb does —
+// it is HTTP Basic against the UE1 web admin. Every rcon-family transport (goldsrc,
+// source, zandronum) is password-only, so demanding a username for them would reject a
+// perfectly valid config (Doom 2 writes over password-only zandronum rcon).
+const USER_PROTOCOLS: readonly RconProtocol[] = ['uweb'];
 
 /**
  * @throws On an unrecognised protocol. Returning undefined would fall through to the
@@ -461,9 +475,8 @@ function validate(config: GameServerConfig): void {
       if (writePort !== undefined && (writePort < 1 || writePort > 65535)) {
         throw new Error(`Invalid RCON_WRITE_PORT: ${writePort}. Must be 1-65535.`);
       }
-      // An authenticated write transport (uweb) needs both a credential and a user.
-      // Like the primary check above, the password must arrive as an ECS secret, not
-      // plaintext; the username is not a secret and rides as a plain sidecar env var.
+      // An authenticated write transport needs a credential. Like the primary check
+      // above, the password must arrive as an ECS secret, not plaintext.
       if (!UNAUTHENTICATED_PROTOCOLS.includes(writeProtocol)) {
         const hasSecret =
           writePasswordSecretVar !== undefined &&
@@ -475,10 +488,12 @@ function validate(config: GameServerConfig): void {
               `RCON_WRITE_PASSWORD_VAR to the SECRET_REFS entry that holds it.`,
           );
         }
-        if (!writeUser) {
+        // Only uweb (HTTP Basic) also needs a username; the rcon-family transports are
+        // password-only. The username is not a secret and rides as a plain env var.
+        if (USER_PROTOCOLS.includes(writeProtocol) && !writeUser) {
           throw new Error(
-            `RCON_WRITE_PROTOCOL=${writeProtocol} is authenticated and needs a username. ` +
-              `Set RCON_WRITE_USER.`,
+            `RCON_WRITE_PROTOCOL=${writeProtocol} authenticates with a username as well as ` +
+              `a password, so it needs a username. Set RCON_WRITE_USER.`,
           );
         }
       }

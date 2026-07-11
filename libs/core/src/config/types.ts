@@ -180,7 +180,23 @@ export interface RedisConfig {
  * read-only (queries); `uweb` is the authenticated Unreal Engine 1 web admin
  * console, a write path with no read counterpart — hence the split below.
  */
-export type RconProtocol = 'goldsrc' | 'source' | 'q3' | 'zandronum' | 'gamespy' | 'uweb';
+/**
+ * A wire protocol the rcon-control sidecar speaks. A service picks one for READS
+ * (queries) and optionally a second for WRITES (commands) — see RconControlConfig.
+ *
+ * `zandronum` runs commands but reports nothing about who is playing; `zandronum-query`
+ * is the launcher port on the same UDP port, which is read-only, unauthenticated, and
+ * the only way to get a Doom 2 roster. Doom 2 therefore reads on one and writes on the
+ * other — the inverse of UT99, which reads on `gamespy` and writes on `uweb`.
+ */
+export type RconProtocol =
+  | 'goldsrc'
+  | 'source'
+  | 'q3'
+  | 'zandronum'
+  | 'zandronum-query'
+  | 'gamespy'
+  | 'uweb';
 
 export interface RconControlConfig {
   enabled: boolean;
