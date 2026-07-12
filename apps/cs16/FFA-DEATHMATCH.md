@@ -5,6 +5,46 @@ cs16 (Metamod + AMX Mod X + CSDM), kept apart from the vanilla server. It is **n
 shipped** — it hit a base-image incompatibility. Written up so the next attempt
 starts from the conclusion, not from scratch.
 
+> # 🛑 SOLVED — and the conclusion below is WRONG. Read this first.
+>
+> **The base image is fine. The bug was a FILENAME.**
+>
+> `jives/hlds` is **not** a custom HLDS build — its Dockerfile is plain SteamCMD
+> (`app_update 90`), i.e. stock Valve HLDS. So "this engine refuses a game-DLL swap"
+> cannot be right; it is everyone's engine.
+>
+> The real cause is a Valve engine bug ([halflife#3399](https://github.com/ValveSoftware/halflife/issues/3399)):
+> when resolving `gamedll_linux`, the engine **truncates the path at the first `_` and
+> appends `.so`**. Metamod-R's release zip contains **only `metamod_i386.so`** — no
+> `metamod.so`. The engine therefore mangles the name, `dlopen`s a path that does not
+> exist, and dies **before Metamod prints its banner**, with a garbled gamedll path.
+>
+> That is *precisely* the symptom recorded below — and it explains the most confusing part
+> of this writeup: why Metamod-R, Metamod-P, `config.ini` and `+localinfo mm_gamedll` all
+> failed **identically**. Every one of those is a *Metamod-level* setting that only takes
+> effect **after** Metamod loads. None of them could ever have helped. The "identical
+> failure across every fix" was read as evidence of an engine incompatibility; it was
+> actually evidence that **Metamod was never being loaded at all**.
+>
+> ## The fix
+>
+> Use Metamod **`1.21.1-am`** (https://www.amxmodx.org/release/metamod-1.21.1-am.zip),
+> which ships a correctly-named **`metamod.so`**, place it at
+> `addons/metamod/dlls/metamod.so`, and point `liblist.gam` at it:
+>
+> ```
+> gamedll       "addons\metamod\dlls\metamod.dll"
+> gamedll_linux "addons/metamod/dlls/metamod.so"
+> ```
+>
+> **Verified locally on the untouched `jives/hlds:tfc` base:** `Metamod version 1.21.1-am`
+> loads. No ReHLDS, no new base image needed. A live reference doing this on stock HLDS:
+> [`LacledesLAN/gamesvr-goldsource-tfc`](https://github.com/LacledesLAN/gamesvr-goldsource-tfc).
+>
+> Everything below about the **AMX Mod X + CSDM assembly and wiring is still correct and
+> reusable** — that part was never the problem. Only the "needs a different base" verdict
+> is retracted. The same fix unblocks a modded **TFC** server (AMXX ships a `tfcx` addon).
+
 > **Read this first — the mechanism has changed.** This was written when the only way to
 > ship a second build was to swap image tags on the one `cs16` service. cs16 is now a
 > **variant project**, so the FFA build is a *sibling service*, not a tag swap: it gets its
@@ -37,7 +77,7 @@ Wiring: `modules.ini` (fun, cstrike, csx, engine, fakemeta, hamsandwich, csdm),
 `liblist.gam` `gamedll_linux` → Metamod. The image **builds cleanly** and this
 config is correct — the assembly is not the problem.
 
-## The blocker: the base image won't load Metamod
+## ~~The blocker: the base image won't load Metamod~~ (RETRACTED — see the box above)
 
 The cs16 base is **`jives/hlds:cstrike-v1.6.5`** (JamesIves/hlds-docker). Its custom
 HLDS build **refuses to load a replacement game DLL** via `liblist.gam`. The moment
