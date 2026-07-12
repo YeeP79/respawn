@@ -1,22 +1,156 @@
 {
   "displayName": "Doom 2 (Zandronum)",
   "engine": "other",
-  "notes": "Zandronum rcon (Huffman-coded UDP, salted-MD5 auth) — verified live. rcon commands use the Doom/ZDoom console: `map`, `set <cvar>`, `get <cvar>`, `kick`, `addbot`. To control this server, enable the sidecar with RCON_PROTOCOL=zandronum and wire sv_rconpassword from a secret.",
-  "maps": ["MAP01", "MAP02", "MAP03", "MAP04", "MAP05", "MAP06", "MAP07", "MAP08"],
-  "commands": [
-    { "name": "change_map", "description": "Load a map lump (e.g. MAP01, MAP07).", "rcon": "map {map}", "args": { "map": { "description": "Map lump name" } } },
-    { "name": "add_bot", "description": "Add a bot to the game.", "rcon": "addbot {name}", "args": { "name": { "description": "Bot name (or empty for a random one)" } } },
-    { "name": "kick_bots", "description": "Remove all bots.", "rcon": "removebots" },
-    { "name": "kick_player", "description": "Kick a player by name.", "rcon": "kick \"{player}\"", "args": { "player": {} }, "danger": true },
-    { "name": "say", "description": "Broadcast a message to everyone.", "rcon": "say {message}", "args": { "message": {} } },
-    { "name": "set_cvar", "description": "Set any server cvar.", "rcon": "set {cvar} {value}", "args": { "cvar": {}, "value": {} } }
+  "notes": "Zandronum rcon (Huffman-coded UDP, salted-MD5 auth) \u2014 verified live. rcon commands use the Doom/ZDoom console: `map`, `set <cvar>`, `get <cvar>`, `kick`, `addbot`. To control this server, enable the sidecar with RCON_PROTOCOL=zandronum and wire sv_rconpassword from a secret.",
+  "maps": [
+    "MAP01",
+    "MAP02",
+    "MAP03",
+    "MAP04",
+    "MAP05",
+    "MAP06",
+    "MAP07",
+    "MAP08"
   ],
-  "queries": [],
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Load a map lump (e.g. MAP01, MAP07).",
+      "rcon": "map {map}",
+      "args": {
+        "map": {
+          "description": "Map lump name"
+        }
+      }
+    },
+    {
+      "name": "add_bot",
+      "description": "Add a bot to the game.",
+      "rcon": "addbot {name}",
+      "args": {
+        "name": {
+          "description": "Bot name (or empty for a random one)"
+        }
+      }
+    },
+    {
+      "name": "kick_bots",
+      "description": "Remove all bots.",
+      "rcon": "removebots"
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name.",
+      "rcon": "kick \"{player}\"",
+      "args": {
+        "player": {}
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {}
+      }
+    },
+    {
+      "name": "set_cvar",
+      "description": "Set any server cvar.",
+      "rcon": "set {cvar} {value}",
+      "args": {
+        "cvar": {},
+        "value": {}
+      }
+    }
+  ],
+  "queries": [
+    {
+      "name": "server_info",
+      "description": "Server name, current map, game type, skill and player count, from the Zandronum launcher port (the read transport). Zandronum rcon itself reports none of this.",
+      "rcon": "info",
+      "singles": {
+        "hostname": "^hostname=(.*)$",
+        "map": "^mapname=(.*)$",
+        "gameType": "^gametype=(\\d+)$",
+        "gameName": "^gamename=(.*)$",
+        "iwad": "^iwad=(.*)$",
+        "skill": "^skill=(\\d+)$",
+        "playerCount": "^numplayers=(\\d+)$",
+        "maxPlayers": "^maxplayers=(\\d+)$",
+        "maxClients": "^maxclients=(\\d+)$"
+      }
+    },
+    {
+      "name": "players",
+      "description": "Everyone on the server, from the Zandronum launcher port. UNLIKE the GameSpy player list (ut99), this DOES include bots \u2014 check the `bot` field (1 = bot). `team` is -1 in non-team modes (coop/deathmatch) and 0/1/... in team modes (teamplay/CTF), because Zandronum only sends a team byte for team gamemodes. `time` is minutes connected; `spec` 1 means spectating.",
+      "rcon": "players",
+      "singles": {
+        "playerCount": "^numplayers=(\\d+)$"
+      },
+      "row": {
+        "match": "^player=(.*?)\\tfrags=(-?\\d+)\\tping=(\\d+)\\tteam=(-?\\d+)\\tbot=(\\d)\\tspec=(\\d)\\ttime=(\\d+)",
+        "fields": [
+          "name",
+          "score",
+          "ping",
+          "team",
+          "bot",
+          "spectator",
+          "minutes"
+        ]
+      }
+    }
+  ],
   "cvars": [
-    { "name": "sv_gravity", "description": "World gravity; 800 is default.", "default": "800", "range": [0, 2000] },
-    { "name": "sv_maxplayers", "description": "Max players.", "default": "16", "range": [1, 64] },
-    { "name": "skill", "description": "Difficulty 0–4 (0 easiest).", "default": "3", "values": ["0", "1", "2", "3", "4"] },
-    { "name": "fraglimit", "description": "Frags to end the map (0 = none).", "default": "0", "range": [0, 1000] },
-    { "name": "timelimit", "description": "Minutes per map (0 = none).", "default": "0", "range": [0, 120] }
+    {
+      "name": "sv_gravity",
+      "description": "World gravity; 800 is default.",
+      "default": "800",
+      "range": [
+        0,
+        2000
+      ]
+    },
+    {
+      "name": "sv_maxplayers",
+      "description": "Max players.",
+      "default": "16",
+      "range": [
+        1,
+        64
+      ]
+    },
+    {
+      "name": "skill",
+      "description": "Difficulty 0\u20134 (0 easiest).",
+      "default": "3",
+      "values": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ]
+    },
+    {
+      "name": "fraglimit",
+      "description": "Frags to end the map (0 = none).",
+      "default": "0",
+      "range": [
+        0,
+        1000
+      ]
+    },
+    {
+      "name": "timelimit",
+      "description": "Minutes per map (0 = none).",
+      "default": "0",
+      "range": [
+        0,
+        120
+      ]
+    }
   ]
 }

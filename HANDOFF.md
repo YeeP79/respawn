@@ -238,10 +238,37 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
    the *deployed* task (not just a local image): `run_command change_map` moved the live
    server `CTF-Face → CTF-Coret`. Reads stay on gamespy (7778), writes go to the UWeb console
    (5580). **ut99 is feature-complete** — read, write, and scale all verified live.
-6. **doom2 has no queries** — `query` can't report who's on it. A `players` query needs its
-   zandronum status parse authored.
+6. **~~doom2 has no queries~~ — DONE.** doom2 now reads on `zandronum-query` (the launcher
+   port) and writes on `zandronum` rcon — the UT99 split, inverted. `query players` returns
+   structured rows (and unlike GameSpy, it DOES report bots: `bot=1`). Proven live.
 7. **Mod commands** — manifests declare none yet (ULX, SourceMod, AMX Mod X). First-class in
-   the schema via the `"mod"` field.
+   the schema via the `"mod"` field. **The GoldSrc mod blocker is SOLVED — see below.**
+
+### ⚠️ The GoldSrc "Metamod won't load" conclusion was WRONG — and it's fixed
+
+`apps/cs16/FFA-DEATHMATCH.md` concluded that `jives/hlds` ships a custom HLDS that refuses
+a game-DLL swap, so a modded CS 1.6 / TFC needed a different base image. **That is not what
+was happening, and `jives/hlds` is stock SteamCMD HLDS (`app_update 90`), not a custom build.**
+
+The real cause is a Valve engine bug ([halflife#3399](https://github.com/ValveSoftware/halflife/issues/3399)):
+resolving `gamedll_linux`, the engine **truncates the name at the first `_` and appends
+`.so`**. Metamod-R's zip ships **only `metamod_i386.so`** — so the engine mangles it, dlopens
+a path that does not exist, and dies *before Metamod's banner* with a garbled name. That is
+exactly the reported symptom, and it explains why Metamod-R, Metamod-P, `config.ini` and
+`+localinfo` all failed IDENTICALLY: every one of those is a Metamod-level setting that only
+matters AFTER Metamod loads.
+
+**Fix: use Metamod `1.21.1-am` (it ships a correctly-named `metamod.so`) at
+`addons/metamod/dlls/metamod.so`, and point `liblist.gam` at it.** VERIFIED LOCALLY on the
+untouched `jives/hlds:tfc` base — `Metamod version 1.21.1-am` loads. One filename.
+
+This unblocks BOTH modded servers on the base image we already have (no ReHLDS):
+- **cs16 FFA** (Metamod + AMX Mod X + CSDM) → `apps/cs16/variants/ffa/`
+- **TFC + AMX Mod X** (the `tfcx` addon exists; the admin surface is game-agnostic:
+  `amx_kick/ban/slay/slap/map/votemap/cvar/say/psay/pause` — a big rcon surface)
+Reference image that does this on stock HLDS: `LacledesLAN/gamesvr-goldsource-tfc`.
+Bots for TFC: **FoxBot** (a Metamod plugin, so it rides the same Metamod; ships prebuilt
+`foxbot.so` + 611 waypoint files — but NO conc-map waypoints).
 8. **Quote-aware `CONTAINER_COMMAND` parse.** `loader.ts parseCommand` splits on whitespace
    ignoring quotes, so `+sv_hostname "Respawn Doom 2"` fractures. Cosmetic.
 9. **Graceful shutdown.** The GoldSrc/zandronum engines ignore SIGTERM, so every clean stop
@@ -273,6 +300,18 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 - **Rapid back-to-back exec sessions drop the SSM control channel** (`TargetNotConnected`),
   and it does not recover on its own — stop the task and let the service replace it. The
   `sample` tool spaces its sessions (3s floor) for exactly this reason.
+- **Zandronum rate-limits QUERIES per source IP, and back-to-back calls lock you out.**
+  `sv_queryignoretime` (default 10s) makes the launcher port ignore an IP that queries
+  again too soon — and *retrying while ignored keeps you ignored*. The fix is to BACK OFF,
+  not retry: 70s of silence and the very next query succeeded. Two consequences:
+  (1) **`sample` on doom2 must use `intervalSeconds` ≥ ~15** — its 3s floor is far below
+  the ignore window, so it would rate-limit itself into all-misses; (2) the idle watchdog
+  polls that SAME launcher port from the SAME loopback IP every 60s, so it shares the
+  bucket with the MCP. This is fail-safe by design — a rate-limited probe returns
+  **-1 = unknown**, which HOLDS the idle timer rather than scaling a populated server to
+  zero — but it does mean an MCP query landing just after a watchdog poll can fail.
+  Lowering `sv_queryignoretime` would fix it at the cost of weakening UDP-amplification
+  protection on a PUBLIC port; not done unilaterally. See backlog.
 - **`capture_raw` accepts EITHER a declared query name or a raw transport token** — it
   resolves a manifest query name to its `rcon` token (`server_info` → gamespy `info`) and
   passes anything else through verbatim, so a manifest-less server can still be probed.
@@ -283,6 +322,36 @@ A stdio driver for the MCP lives at the session scratchpad `drive.mjs`. Client c
 - **GameSpy `\players\` lists humans only** (verified on ut99): bots never appear, and a
   player drops from the list while dead/respawning. It is a live snapshot, not a roster.
   An empty server's raw `players` reply is just the envelope: `\queryid\3.1\final\`.
+- **The UT99 UWeb console gives NO FEEDBACK — "(command sent)" is never evidence.**
+  Pure garbage (`FLIBBERTIGIBBET`) returns the EXACT same
+  `"(command sent; web admin returned no console output)"` as `servertravel`, which we know
+  works. So a uweb command's reply proves nothing, for any command. **ALWAYS confirm by
+  effect** (a follow-up query). This is the single most important thing to know about ut99.
+
+  | Command | Status | Evidence |
+  |---|:--:|---|
+  | `servertravel <map>?game=?mutator=` | ✅ PROVEN | map actually changes |
+  | `set <Pkg.Class> <Prop> <val>` / `get` | ✅ PROVEN | `get` reads the value back |
+  | `say <text>` | ✅ PROVEN | appears as `Admin:` in the console |
+  | `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` | ❓ **UNVERIFIED** | see below |
+
+  The UT99 source says those five are `exec function`s on **PlayerPawn**, and the web console
+  has no PlayerPawn — so they *should* be no-ops (tellingly, UTServerAdmin implements its own
+  Kick by destroying the pawn directly rather than issuing a console `kick`). **But this could
+  NOT be confirmed**, and an earlier claim in this file that it *was* confirmed was wrong.
+  Why no test works:
+  - **Bots do not spawn on an empty server.** UT99 waits for a human before starting the match
+    (`NetWait`), so `AddBots` has nothing to show even if it dispatches fine.
+  - **GameSpy is blind to bots anyway** — neither `numplayers` nor `\players\` counts them
+    (independently confirmed: a human in the server saw bots while `numplayers` ignored them).
+  - **The console can't be probed** — garbage and valid commands return the same empty reply.
+
+  They are therefore KEPT in the manifest, flagged `"unverified": true` so the MCP warns rather
+  than silently lying. **To settle it: put a human in the server** (that starts the match and
+  spawns bots), then try `add_bots` / `kick_player` and watch in-game. That is the only test
+  that can work.
+  Meanwhile the cvar path IS proven: set `min_players`, then `change_map` to apply. Caveat: UE1
+  `set` writes the CLASS DEFAULT, so a cvar lands on the NEXT map.
 - **UT99 has two passwords.** `UT_ADMINPWD` → in-game admin; `UT_WEBADMINPWD` → the UWeb
   console on 5580. Set only the first and the webadmin keeps the image default `admin/admin`.
   Both now point at the same secret; keep it that way for any new UE1 game.

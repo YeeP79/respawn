@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { parseManifest, resolveWireCommand } from './manifest.js';
+import { parseManifest, resolveCvarCommand, resolveWireCommand } from './manifest.js';
 import { parseMapList } from './capabilities.js';
 import { MOD_DATA_SCHEMAS } from './mod-data.js';
 
@@ -195,5 +195,46 @@ describe('resolveWireCommand', () => {
   it('passes everything through when the service has no manifest', () => {
     expect(resolveWireCommand(undefined, 'status')).toBe('status');
     expect(resolveWireCommand(undefined, 'server_info')).toBe('server_info');
+  });
+});
+
+describe('resolveCvarCommand', () => {
+  const quake = parseManifest(
+    { cvars: [{ name: 'sv_gravity', description: 'g' }] },
+    'doom2',
+  );
+  const ue1 = parseManifest(
+    {
+      cvars: [
+        {
+          name: 'time_limit',
+          description: 't',
+          rcon: 'set Botpack.CTFGame TimeLimit {value}',
+          read: 'get Botpack.CTFGame TimeLimit',
+        },
+        { name: 'broken', description: 'b', rcon: 'set Botpack.CTFGame TimeLimit' },
+      ],
+    },
+    'ut99',
+  );
+
+  it('defaults to the Quake console form', () => {
+    expect(resolveCvarCommand(quake, 'sv_gravity', '900')).toBe('sv_gravity "900"');
+  });
+
+  it('uses a declared template for a non-Quake console (UE1 has no cvars)', () => {
+    // Shipping the Quake form here would silently do nothing on UT99.
+    expect(resolveCvarCommand(ue1, 'time_limit', '20')).toBe(
+      'set Botpack.CTFGame TimeLimit 20',
+    );
+  });
+
+  it('falls back to the Quake form for an undeclared cvar', () => {
+    expect(resolveCvarCommand(ue1, 'whatever', '1')).toBe('whatever "1"');
+    expect(resolveCvarCommand(undefined, 'sv_gravity', '800')).toBe('sv_gravity "800"');
+  });
+
+  it('rejects a template with no {value} — it would "succeed" while changing nothing', () => {
+    expect(() => resolveCvarCommand(ue1, 'broken', '5')).toThrow(/\{value\}/);
   });
 });

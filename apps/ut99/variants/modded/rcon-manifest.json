@@ -1,19 +1,85 @@
 {
   "displayName": "Unreal Tournament 99",
   "engine": "other",
-  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) — the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs.",
+  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) \u2014 the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs. ADMIN SURFACE \u2014 what is PROVEN vs what is NOT. The UWeb console runs `Level.ConsoleCommand`. PROVEN WORKING by observed effect: `servertravel` (map changes), `set`/`get` (value reads back), `say` (appears as 'Admin:'). UNVERIFIED: `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` \u2014 the UT99 source says these are `exec function`s on PlayerPawn and the web console has no PlayerPawn, so they may silently do nothing; but this could NOT be confirmed, because bots do not spawn on an empty server (UT99 waits for a human before starting the match) and GameSpy `numplayers`/`\\players\\` do not count bots anyway. They are kept, flagged `unverified`. \u26a0\ufe0f CRITICAL: the console gives NO feedback. A pure garbage command returns the SAME '(command sent; web admin returned no console output)' as `servertravel`. So that reply is NEVER evidence a command worked \u2014 ALWAYS confirm by effect (a follow-up query). NOTE: UE1 `set` writes the CLASS DEFAULT, so a cvar takes effect on the NEXT map \u2014 pair it with `change_map` to apply it now.",
   "modData": [
-    { "name": "CustomCrossHairScale", "package": "CCHS4", "kind": "mutator", "control": "player", "notes": "Players adjust crosshair size with `mutate ch_scale N`." },
-    { "name": "FlagAnnouncementsV2", "package": "FlagAnnouncementsV2", "kind": "mutator", "control": "passive", "configFile": "FlagAnnouncements.ini" },
-    { "name": "KickIdlePlayers2", "package": "KickIdlePlayers2", "kind": "mutator", "control": "passive", "configFile": "KickIdlePlayers2.ini" },
-    { "name": "MapVoteExtended", "package": "MVE2h", "kind": "mutator", "control": "player", "configFile": "MVE_Config.ini", "notes": "Post-map vote; players open it with the `!v` chat command." },
-    { "name": "VoteSys", "package": "VoteSys_v12", "kind": "mutator", "control": "player", "notes": "Alternative voting system (image marks it as testing)." },
-    { "name": "WhoPushedMe", "package": "WhoPushedMe", "kind": "mutator", "control": "passive" },
-    { "name": "ZeroPingPlus103", "package": "ZeroPingPlus103", "kind": "mutator", "control": "passive", "notes": "Client-side hit detection." },
-    { "name": "StrangeLove", "package": "SLV205", "kind": "mutator", "control": "passive", "notes": "Redeemers become flyable guided missiles." },
-    { "name": "MonsterHunt", "package": "MonsterHunt", "kind": "gametype", "control": "admin", "notes": "Co-op. Select with change_gametype gametype=MonsterHunt.MonsterHunt on an MH-* map." },
-    { "name": "BunnyTrack", "package": "BTPlusPlusPublicUTBT_beta3", "kind": "gametype", "control": "admin", "notes": "Bunny-hop mode; use its CTF-BT-* maps." },
-    { "name": "ChaosUT", "package": "ChaosUT", "kind": "gametype", "control": "admin", "notes": "Chaos game types and maps (CUT/CUTA)." }
+    {
+      "name": "CustomCrossHairScale",
+      "package": "CCHS4",
+      "kind": "mutator",
+      "control": "player",
+      "notes": "Players adjust crosshair size with `mutate ch_scale N`."
+    },
+    {
+      "name": "FlagAnnouncementsV2",
+      "package": "FlagAnnouncementsV2",
+      "kind": "mutator",
+      "control": "passive",
+      "configFile": "FlagAnnouncements.ini"
+    },
+    {
+      "name": "KickIdlePlayers2",
+      "package": "KickIdlePlayers2",
+      "kind": "mutator",
+      "control": "passive",
+      "configFile": "KickIdlePlayers2.ini"
+    },
+    {
+      "name": "MapVoteExtended",
+      "package": "MVE2h",
+      "kind": "mutator",
+      "control": "player",
+      "configFile": "MVE_Config.ini",
+      "notes": "Post-map vote; players open it with the `!v` chat command."
+    },
+    {
+      "name": "VoteSys",
+      "package": "VoteSys_v12",
+      "kind": "mutator",
+      "control": "player",
+      "notes": "Alternative voting system (image marks it as testing)."
+    },
+    {
+      "name": "WhoPushedMe",
+      "package": "WhoPushedMe",
+      "kind": "mutator",
+      "control": "passive"
+    },
+    {
+      "name": "ZeroPingPlus103",
+      "package": "ZeroPingPlus103",
+      "kind": "mutator",
+      "control": "passive",
+      "notes": "Client-side hit detection."
+    },
+    {
+      "name": "StrangeLove",
+      "package": "SLV205",
+      "kind": "mutator",
+      "control": "passive",
+      "notes": "Redeemers become flyable guided missiles."
+    },
+    {
+      "name": "MonsterHunt",
+      "package": "MonsterHunt",
+      "kind": "gametype",
+      "control": "admin",
+      "notes": "Co-op. Select with change_gametype gametype=MonsterHunt.MonsterHunt on an MH-* map."
+    },
+    {
+      "name": "BunnyTrack",
+      "package": "BTPlusPlusPublicUTBT_beta3",
+      "kind": "gametype",
+      "control": "admin",
+      "notes": "Bunny-hop mode; use its CTF-BT-* maps."
+    },
+    {
+      "name": "ChaosUT",
+      "package": "ChaosUT",
+      "kind": "gametype",
+      "control": "admin",
+      "notes": "Chaos game types and maps (CUT/CUTA)."
+    }
   ],
   "maps": [
     "CTF-Face",
@@ -40,7 +106,9 @@
       "description": "Load a map, keeping the current game type. Map prefix must match the running type (a CTF-* map in CTF, DM-* in DeathMatch). Use change_gametype to also switch type.",
       "rcon": "servertravel {map}.unr",
       "args": {
-        "map": { "description": "Map name without extension, e.g. CTF-Face or DM-Deck16][" }
+        "map": {
+          "description": "Map name without extension, e.g. CTF-Face or DM-Deck16]["
+        }
       }
     },
     {
@@ -48,7 +116,9 @@
       "description": "Load a map AND switch the game type. This is the runtime path into the mod game types (MonsterHunt). Map prefix should match the type (CTF-* for CTFGame, MH-* for MonsterHunt, DM-* for DeathMatch/TeamGame/Domination).",
       "rcon": "servertravel {map}.unr?game={gametype}",
       "args": {
-        "map": { "description": "Map name without extension, e.g. MH-Canyon" },
+        "map": {
+          "description": "Map name without extension, e.g. MH-Canyon"
+        },
         "gametype": {
           "description": "Game type class: Botpack.CTFGame (CTF), Botpack.DeathMatchPlus (DM), Botpack.TeamGamePlus (Team DM), Botpack.Domination, Botpack.Assault, MonsterHunt.MonsterHunt (co-op mod).",
           "values": [
@@ -66,36 +136,58 @@
       "name": "kick_player",
       "description": "Kick a player by name.",
       "rcon": "kick {player}",
-      "args": { "player": { "description": "Exact player name as shown by the players query." } },
-      "danger": true
+      "args": {
+        "player": {
+          "description": "Exact player name as shown by the players query."
+        }
+      },
+      "danger": true,
+      "unverified": true
     },
     {
       "name": "add_bots",
       "description": "Add bots to the current match.",
       "rcon": "AddBots {count}",
-      "args": { "count": { "description": "Number of bots to add.", "type": "int" } }
+      "args": {
+        "count": {
+          "description": "Number of bots to add.",
+          "type": "int"
+        }
+      },
+      "unverified": true
     },
     {
       "name": "remove_bots",
       "description": "Remove all bots from the current match.",
-      "rcon": "KillAll Bot"
+      "rcon": "KillAll Bot",
+      "unverified": true
     },
     {
       "name": "say",
       "description": "Broadcast an admin message to everyone on the server (shown as 'Admin: <message>').",
       "rcon": "say {message}",
-      "args": { "message": { "description": "Text to broadcast." } }
+      "args": {
+        "message": {
+          "description": "Text to broadcast."
+        }
+      }
     },
     {
       "name": "pause",
       "description": "Toggle pause on the current match.",
-      "rcon": "Pause"
+      "rcon": "Pause",
+      "unverified": true
     },
     {
       "name": "mutate",
       "description": "Send a raw server-side mutator command (mutator-specific; escape hatch for mods that expose a mutate verb).",
       "rcon": "mutate {command}",
-      "args": { "command": { "description": "Mutator command and args, e.g. 'ch_scale 1'." } }
+      "args": {
+        "command": {
+          "description": "Mutator command and args, e.g. 'ch_scale 1'."
+        }
+      },
+      "unverified": true
     }
   ],
   "queries": [
@@ -116,7 +208,7 @@
     },
     {
       "name": "rules",
-      "description": "Match settings and active gameplay mutators, from the GameSpy \\rules\\ query. `mutators` is a comma-separated list of the mutators the running game type reports (e.g. InstaGib) — use it to see which shipped mods are live. The rule set varies by game type.",
+      "description": "Match settings and active gameplay mutators, from the GameSpy \\rules\\ query. `mutators` is a comma-separated list of the mutators the running game type reports (e.g. InstaGib) \u2014 use it to see which shipped mods are live. The rule set varies by game type.",
       "rcon": "rules",
       "singles": {
         "mutators": "^mutators=(.*)$",
@@ -138,8 +230,63 @@
       "rcon": "players",
       "row": {
         "match": "^player=(.*?)\\tfrags=(-?\\d+)\\tping=(\\d+)\\tteam=(\\d+)",
-        "fields": ["name", "score", "ping", "team"]
+        "fields": [
+          "name",
+          "score",
+          "ping",
+          "team"
+        ]
       }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "time_limit",
+      "description": "Match time limit in minutes. Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.CTFGame TimeLimit {value}",
+      "read": "get Botpack.CTFGame TimeLimit"
+    },
+    {
+      "name": "goal_team_score",
+      "description": "Captures needed to win (CTF). Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.CTFGame GoalTeamScore {value}",
+      "read": "get Botpack.CTFGame GoalTeamScore"
+    },
+    {
+      "name": "frag_limit",
+      "description": "Frags needed to win (DM). Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.DeathMatchPlus FragLimit {value}",
+      "read": "get Botpack.DeathMatchPlus FragLimit"
+    },
+    {
+      "name": "friendly_fire",
+      "description": "Team-damage scale, 0.0 = off, 1.0 = full. Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.TeamGamePlus FriendlyFireScale {value}",
+      "read": "get Botpack.TeamGamePlus FriendlyFireScale"
+    },
+    {
+      "name": "min_players",
+      "description": "Bots are spawned to fill the server up to this count. Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.CTFGame MinPlayers {value}",
+      "read": "get Botpack.CTFGame MinPlayers"
+    },
+    {
+      "name": "max_players",
+      "description": "Player slots. Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Engine.GameInfo MaxPlayers {value}",
+      "read": "get Engine.GameInfo MaxPlayers"
+    },
+    {
+      "name": "use_translocator",
+      "description": "Translocator on/off (True/False). Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.DeathMatchPlus bUseTranslocator {value}",
+      "read": "get Botpack.DeathMatchPlus bUseTranslocator"
+    },
+    {
+      "name": "novice_mode",
+      "description": "Easier bots (True/False). Takes effect on the next map (UE1 `set` writes the class default).",
+      "rcon": "set Botpack.DeathMatchPlus bNoviceMode {value}",
+      "read": "get Botpack.DeathMatchPlus bNoviceMode"
     }
   ]
 }

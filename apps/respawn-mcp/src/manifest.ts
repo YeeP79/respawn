@@ -34,6 +34,15 @@ const commandShape = {
   mod: z.string().optional(),
   /** Flag destructive actions so the LLM (and the operator) treat them carefully. */
   danger: z.boolean().optional(),
+  /**
+   * The command is DECLARED but never confirmed to take effect on this transport. Tell the
+   * user it may be a no-op and verify by effect (a follow-up query) — never trust the
+   * transport's reply.
+   *
+   * This exists because UT99's UWeb console returns the identical "(command sent)" string for
+   * a working command and for pure garbage, so "success" there is not evidence of anything.
+   */
+  unverified: z.boolean().optional(),
 } as const;
 
 export const CvarSchema = z.object({
@@ -43,6 +52,19 @@ export const CvarSchema = z.object({
   values: z.array(z.string()).optional(),
   range: z.tuple([z.number(), z.number()]).optional(),
   mod: z.string().optional(),
+  /**
+   * How to SET this cvar on the wire, with `{value}` substituted. Optional: a Quake-style
+   * console (goldsrc/source/q3/zandronum) takes `<name> "<value>"`, which is the default
+   * and needs no template.
+   *
+   * It exists for consoles that are NOT Quake-style. UE1 (UT99) has no cvars at all — its
+   * equivalent is `set <Package.Class> <Property> <Value>`, so ut99 declares e.g.
+   * `"rcon": "set Botpack.CTFGame TimeLimit {value}"`. Verified against the real server:
+   * `set` (and `get`) reach the engine exec chain through the UWeb console.
+   */
+  rcon: z.string().optional(),
+  /** How to READ this cvar back, if the console supports it (UE1: `get <Class> <Prop>`). */
+  read: z.string().optional(),
 }).strict();
 
 /**
@@ -161,4 +183,31 @@ export function resolveWireCommand(
   command: string,
 ): string {
   return manifest?.queries.find((q) => q.name === command)?.rcon ?? command;
+}
+
+/**
+ * The wire command that sets a cvar to `value`.
+ *
+ * Quake-family consoles take `<name> "<value>"` — that is the default and covers
+ * goldsrc/source/q3/zandronum. A manifest may override it per-cvar with an `rcon` template
+ * containing `{value}`, which is what makes non-Quake consoles work at all: UE1 (UT99) has
+ * no cvars, only `set <Package.Class> <Property> <Value>`, so shipping the Quake form there
+ * silently does nothing.
+ *
+ * @throws When a declared template has no `{value}` placeholder — that would send a command
+ *   with the value dropped, which "succeeds" while changing nothing.
+ */
+export function resolveCvarCommand(
+  manifest: Manifest | undefined,
+  cvar: string,
+  value: string,
+): string {
+  const template = manifest?.cvars.find((c) => c.name === cvar)?.rcon;
+  if (template === undefined) return `${cvar} "${value}"`;
+  if (!template.includes('{value}')) {
+    throw new Error(
+      `Cvar "${cvar}" declares an rcon template with no {value} placeholder: ${template}`,
+    );
+  }
+  return template.replaceAll('{value}', value);
 }

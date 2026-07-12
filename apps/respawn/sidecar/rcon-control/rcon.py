@@ -9,14 +9,22 @@ Routing lives in the caller: one control sidecar fronts exactly one game server,
 and it learns which one from its environment (RCON_PROTOCOL, RCON_PORT). An MCP
 client selects the server by choosing which task to exec into.
 
-Five wire protocols, because the engines differ:
-  goldsrc    UDP. Challenge, then `rcon <challenge> "<pass>" <cmd>`. The password
-             is re-sent with every command (protocol limitation).
-  source     TCP, length-prefixed packets. Authenticate once per connection.
-  q3         idTech3 (Quake 3 / Quake Live). One connectionless UDP packet.
-  zandronum  Stateful, Huffman-coded UDP with salted-MD5 auth (Doom 2 etc.).
-  gamespy    Unreal Engine 1 (UT99) query port. Read-only and unauthenticated —
-             it answers `\info\`/`\players\` and takes no commands at all.
+Seven wire protocols, because the engines differ:
+  goldsrc          UDP. Challenge, then `rcon <challenge> "<pass>" <cmd>`. The password
+                   is re-sent with every command (protocol limitation).
+  source           TCP, length-prefixed packets. Authenticate once per connection.
+  q3               idTech3 (Quake 3 / Quake Live). One connectionless UDP packet.
+  zandronum        Stateful, Huffman-coded UDP with salted-MD5 auth (Doom 2 etc.).
+                   Executes commands but reports NOTHING about who is playing.
+  zandronum-query  The Zandronum *launcher* port (same UDP port). Read-only and
+                   unauthenticated; this is the only way to see a Doom 2 roster.
+  gamespy          Unreal Engine 1 (UT99) query port. Read-only and unauthenticated —
+                   it answers `\info\`/`\players\` and takes no commands at all.
+  uweb             UE1 web admin console (UT99 writes).
+
+A service may speak TWO of these: a read transport (queries) and a write transport
+(commands), selected by --write. UT99 reads on gamespy and writes on uweb; Doom 2 is
+the inverse — it reads on zandronum-query and writes on zandronum rcon.
 
 Exit codes: 0 on success, 1 on failure (auth rejected, timeout, bad protocol).
 """
@@ -29,6 +37,7 @@ import re
 import socket
 import struct
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -294,6 +303,198 @@ def zandronum_exec(host: str, port: int, password: str, command: str, timeout: f
         sock.close()
 
 
+# --- Zandronum launcher protocol (the READ half of a Zandronum service) --------
+#
+# Zandronum rcon (above) executes commands but reports nothing about who is playing.
+# The *launcher* protocol on the same UDP port does: it is the unauthenticated query
+# the server browsers use. Pairing them gives Doom 2 the read/write split UT99 already
+# has (gamespy reads, uweb writes) — here inverted: launcher reads, rcon writes.
+#
+# Request:  0xff <SQF flags> — the 0xff prefix is the Huffman codec's "rest is
+#           unencoded" marker, which is why no encoder is needed, only _zan_decode.
+# Reply:    Huffman-coded. Fields appear in ASCENDING FLAG-BIT ORDER, and the reply
+#           ECHOES the flags, so the parse is self-describing.
+#
+# Every offset below was verified against a live zandronum 3.2.1 server in BOTH a
+# non-team (coop) and a team (teamplay) game — see the player-record note.
+ZANDRONUM_LAUNCHER_CHALLENGE = 199
+ZANDRONUM_SERVER_CHALLENGE = 5660023
+ZANDRONUM_SERVER_IGNORING = 5660024  # query flood protection (sv_queryignoretime)
+ZANDRONUM_SERVER_BANNED = 5660025
+
+SQF_NAME = 0x00000001
+SQF_MAPNAME = 0x00000008
+SQF_MAXCLIENTS = 0x00000010
+SQF_MAXPLAYERS = 0x00000020
+SQF_GAMETYPE = 0x00000080
+SQF_GAMENAME = 0x00000100
+SQF_IWAD = 0x00000200
+SQF_GAMESKILL = 0x00001000
+SQF_NUMPLAYERS = 0x00080000
+SQF_PLAYERDATA = 0x00100000
+
+_SQF_INFO = (
+    SQF_NAME | SQF_MAPNAME | SQF_MAXCLIENTS | SQF_MAXPLAYERS | SQF_GAMETYPE
+    | SQF_GAMENAME | SQF_IWAD | SQF_GAMESKILL | SQF_NUMPLAYERS
+)
+# GAMETYPE is requested even for `players`: a team gamemode adds a byte to every
+# player record, so the parse cannot be done without knowing the mode.
+_SQF_PLAYERS = SQF_GAMETYPE | SQF_NUMPLAYERS | SQF_PLAYERDATA
+
+ZANDRONUM_QUERIES = {
+    "info": _SQF_INFO,
+    "players": _SQF_PLAYERS,
+    "status": _SQF_INFO | SQF_PLAYERDATA,
+}
+
+# Zandronum GAMEMODE_e values that are team games. Only these carry a `team` byte in
+# each player record. The parser treats this as a HINT and still validates by exact
+# buffer consumption, so an unknown future mode cannot silently corrupt a row.
+_ZAN_TEAM_MODES = frozenset({4, 8, 10, 11, 12, 13, 14, 15})
+
+
+def zandronum_query_exec(
+    host: str, port: int, password: str, command: str, timeout: float
+) -> str:
+    """Query the Zandronum launcher port. Read-only: never sends back a command.
+
+    Returns the Huffman-DECODED packet as hex. The wire here is binary, so its faithful
+    "raw" rendering is the bytes themselves — `--raw` (capture_raw) hands those back
+    losslessly, which is exactly what authoring a parser for a binary protocol needs.
+    _zandronum_query_normalize turns them into the key=value / player= lines the query
+    engine matches, keeping fetch and reshape separate as every other transport does.
+    """
+    query = (command or "info").strip().lower() or "info"
+    if query not in ZANDRONUM_QUERIES:
+        raise RconError(
+            f"unknown zandronum query {query!r}; expected one of "
+            f"{', '.join(sorted(ZANDRONUM_QUERIES))}"
+        )
+
+    request = b"\xff" + struct.pack(
+        "<III",
+        ZANDRONUM_LAUNCHER_CHALLENGE,
+        ZANDRONUM_QUERIES[query],
+        int(time.time()) & 0xFFFFFFFF,
+    )
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(request, (host, port))
+        data, _ = sock.recvfrom(8192)
+    except socket.timeout as exc:
+        raise RconError(f"no reply from {host}:{port} within {timeout}s") from exc
+    finally:
+        sock.close()
+
+    raw = _zan_decode(data)
+    if len(raw) < 4:
+        raise RconError("short reply from zandronum launcher port")
+    code = struct.unpack("<I", raw[0:4])[0]
+    if code == ZANDRONUM_SERVER_IGNORING:
+        # Rate limiting is NOT an empty server. Must surface as an error so the
+        # watchdog reads it as "unknown" rather than "nobody is playing".
+        raise RconError("server is rate-limiting queries (sv_queryignoretime)")
+    if code == ZANDRONUM_SERVER_BANNED:
+        raise RconError("this host is banned from querying the server")
+    if code != ZANDRONUM_SERVER_CHALLENGE:
+        raise RconError(f"unexpected zandronum response code {code}")
+    return raw.hex()
+
+
+def _zandronum_query_normalize(hex_reply: str) -> str:
+    """Reshape a decoded launcher reply into `key=value` lines and `player=` rows.
+
+    Field order follows ascending SQF bit order and the reply echoes the flags, so this
+    reads only what was actually asked for. Player records are `name, frags(i16),
+    ping(i16), spec(u8), bot(u8), [team(u8) — TEAM MODES ONLY], time(u8)`; the team byte
+    is why the record length is 8 in CTF/teamplay and 7 in coop/deathmatch. The layout is
+    chosen by the gamemode and then CONFIRMED by exact buffer consumption — a mismatch
+    raises rather than emitting a plausible, wrong roster.
+    """
+    raw = bytes.fromhex(hex_reply)
+    off = raw.index(b"\x00", 8) + 1  # response code(4) + echoed time(4) + version NTS
+    flags = struct.unpack("<I", raw[off : off + 4])[0]
+    off += 4
+
+    def nts() -> str:
+        nonlocal off
+        end = raw.index(b"\x00", off)
+        value = raw[off:end].decode("latin-1")
+        off = end + 1
+        return value
+
+    def u8() -> int:
+        nonlocal off
+        value = raw[off]
+        off += 1
+        return value
+
+    lines: list[str] = []
+    gametype = -1
+    if flags & SQF_NAME:
+        lines.append(f"hostname={nts()}")
+    if flags & SQF_MAPNAME:
+        lines.append(f"mapname={nts()}")
+    if flags & SQF_MAXCLIENTS:
+        lines.append(f"maxclients={u8()}")
+    if flags & SQF_MAXPLAYERS:
+        lines.append(f"maxplayers={u8()}")
+    if flags & SQF_GAMETYPE:
+        gametype = u8()
+        instagib, buckshot = u8(), u8()
+        lines.append(f"gametype={gametype}")
+        lines.append(f"instagib={instagib}")
+        lines.append(f"buckshot={buckshot}")
+    if flags & SQF_GAMENAME:
+        lines.append(f"gamename={nts()}")
+    if flags & SQF_IWAD:
+        lines.append(f"iwad={nts()}")
+    if flags & SQF_GAMESKILL:
+        lines.append(f"skill={u8()}")
+
+    count = 0
+    if flags & SQF_NUMPLAYERS:
+        count = u8()
+        lines.append(f"numplayers={count}")
+
+    if flags & SQF_PLAYERDATA:
+        start = off
+        hinted = 8 if gametype in _ZAN_TEAM_MODES else 7
+        for size in (hinted, 15 - hinted):  # try the hint, then the only alternative
+            off = start
+            rows: list[str] = []
+            try:
+                for _ in range(count):
+                    end = raw.index(b"\x00", off)
+                    name = raw[off:end].decode("latin-1")
+                    off = end + 1
+                    rec = raw[off : off + size]
+                    if len(rec) < size:
+                        raise ValueError("truncated player record")
+                    off += size
+                    frags, ping = struct.unpack("<hh", rec[0:4])
+                    spec, bot = rec[4], rec[5]
+                    team = rec[6] if size == 8 else -1
+                    seconds = rec[7] if size == 8 else rec[6]
+                    rows.append(
+                        f"player={name}\tfrags={frags}\tping={ping}\tteam={team}"
+                        f"\tbot={bot}\tspec={spec}\ttime={seconds}"
+                    )
+            except (ValueError, IndexError, struct.error):
+                continue
+            if off == len(raw):  # consumed exactly -> this layout is the right one
+                lines.extend(rows)
+                break
+        else:
+            raise RconError(
+                "could not parse zandronum player data (no record size consumed the "
+                "reply exactly) — refusing to report a roster that may be wrong"
+            )
+
+    return "\n".join(lines)
+
+
 # GameSpy v1 queries an Unreal Engine 1 server answers. `status` is the union of
 # basic+info+rules+players and is what the browsers use.
 GAMESPY_QUERIES = ("info", "basic", "rules", "players", "status", "echo")
@@ -507,6 +708,7 @@ PROTOCOLS = {
     "source": source_exec,
     "q3": q3_exec,
     "zandronum": zandronum_exec,
+    "zandronum-query": zandronum_query_exec,
     "gamespy": gamespy_exec,
     "uweb": uweb_exec,
 }
@@ -517,11 +719,12 @@ PROTOCOLS = {
 # transport only has to register here — the introspection tooling needs no change.
 NORMALIZERS: dict[str, Callable[[str], str]] = {
     "gamespy": _gamespy_normalize,
+    "zandronum-query": _zandronum_query_normalize,
 }
 
 # Query-only protocols whose port takes no credentials. Requiring a password for
 # these would force a pointless secret on a service that has none to give.
-UNAUTHENTICATED_PROTOCOLS = frozenset({"gamespy"})
+UNAUTHENTICATED_PROTOCOLS = frozenset({"gamespy", "zandronum-query"})
 
 
 def main() -> int:

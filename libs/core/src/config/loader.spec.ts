@@ -669,6 +669,42 @@ describe('loadConfig', () => {
       });
     });
 
+    it('parses the inverse split (Doom 2: zandronum-query read + zandronum rcon write)', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-zan-split');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=zandronum-query',
+        'RCON_PORT=10666',
+        'RCON_WRITE_PROTOCOL=zandronum',
+        'RCON_WRITE_PORT=10666',
+        'RCON_WRITE_PASSWORD_VAR=RCON_PASSWORD',
+      ].join('\n'));
+      // No RCON_WRITE_USER: zandronum rcon is password-only. Demanding a username here
+      // (as the check used to, for every authenticated write protocol) would reject it.
+      expect(loadConfig(dir, 'dev').rconControl).toMatchObject({
+        protocol: 'zandronum-query',
+        writeProtocol: 'zandronum',
+        writePort: 10666,
+        writePasswordSecretVar: 'RCON_PASSWORD',
+      });
+    });
+
+    it('still demands a username for uweb, which authenticates with one', () => {
+      const dir = path.join(FIXTURES_DIR, 'rc-uweb-nouser');
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'SECRET_REFS=UT_ADMINPWD=sm:respawn/x/admin,UT_WEBADMINPWD=sm:respawn/x/web',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PROTOCOL=gamespy',
+        'RCON_PASSWORD_VAR=UT_ADMINPWD',
+        'RCON_WRITE_PROTOCOL=uweb',
+        'RCON_WRITE_PASSWORD_VAR=UT_WEBADMINPWD',
+      ].join('\n'));
+      expect(() => loadConfig(dir, 'dev')).toThrow(/username/i);
+    });
+
     it('leaves the write transport undefined when not configured', () => {
       const dir = path.join(FIXTURES_DIR, 'rc-nowrite');
       writeEnvFile(dir, [
