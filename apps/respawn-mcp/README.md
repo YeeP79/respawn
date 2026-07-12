@@ -94,6 +94,11 @@ npx nx build respawn-mcp            # -> apps/respawn-mcp/dist/index.mjs
 `RESPAWN_PROFILE` / `RESPAWN_REGION` fall back to `AWS_PROFILE` / `AWS_REGION`,
 then to `us-east-1`.
 
+> **`RESPAWN_REGION` must match the region your servers are actually deployed in.**
+> Discovery is region-scoped, so a mismatch (e.g. the default `us-east-1` while the
+> fleet runs in `us-east-2`) makes `list_servers` return nothing — it looks like an
+> auth problem but isn't. Check with `aws ecs list-clusters --region <region> --profile respawn`.
+
 **Lifecycle tools (deploy/destroy/synth/diff/push/check_updates/scale).** Beyond controlling
 running servers, the MCP shares the CLI's deploy engine (`@respawn/core`). These tools
 read the repo, so set `RESPAWN_WORKSPACE_ROOT` to the repo root when the MCP runs
@@ -180,6 +185,29 @@ mod's commands, a new query — needs only an MCP rebuild, never a game redeploy
   here, not in the MCP.
 - **cvars** — documented tunables with ranges, so the LLM uses valid values.
 - **maps** — `"live"` queries the server (`maps *`); or an explicit array.
+
+## Gotchas
+
+- **`set_cvar` only accepts cvars declared in the manifest.** It validates against
+  the `cvars` list (names, ranges) so the LLM can't set a garbage value. For any
+  console variable *not* in the manifest — server tunables like `sv_maxupdaterate`,
+  `mp_maxrounds`, `mp_timelimit` — use the raw **`rcon`** tool instead, or add the
+  cvar to `rcon-manifest.json`.
+- **Changes made through the MCP are ephemeral on scale-to-zero servers.** Respawn
+  servers idle down to zero tasks and come back as a fresh container. A cvar or map
+  you set live is gone on the next cold start. Persist anything that must survive in
+  the game's config (for cs16, the shim's `server.cfg`), not a live command.
+- **`maps: "live"` degrades, and can miss maps on a large pool.** The live query
+  runs `maps *` through one exec session; on a very long map list the session can be
+  truncated before the closing sentinel, and `get_server_options` returns a
+  `mapsNote` explaining it fell back to the manifest maps. If a server has a big map
+  pool, prefer an explicit `maps` array in the manifest.
+- **Temporary/SSO credentials expire mid-session.** A lapsed session token surfaces
+  as `ExpiredTokenException` from the `aws` calls, not an MCP error. Re-run
+  `aws sso login --profile respawn` (or refresh the profile) and retry.
+- **A dropped/rate-limited probe reads as *unknown*, never *empty*** — the same
+  safety property the idle watchdog relies on. If a query returns nothing, the server
+  may simply be mid-wake; retry rather than assume it's down.
 
 ## Is the connection to the sidecar secure?
 
