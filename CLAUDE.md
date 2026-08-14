@@ -75,7 +75,7 @@ logic must ship with specs; that is where the bugs are.
 
 ## Project Patterns
 
-**Adding a game server.** Four files in `apps/<name>/`:
+**Adding a game server.** Five files in `apps/<name>/`:
 
 | File | Purpose |
 |------|---------|
@@ -83,13 +83,36 @@ logic must ship with specs; that is where the bugs are.
 | `.env.example` | Tracked template. Keep in sync with `.env` |
 | `Dockerfile` | Even when `IMAGE_URI` is set (unused, but discovery-friendly) |
 | `project.json` | `{"name","projectType":"application","tags":["type:app","lang:dockerfile"]}` |
+| `rcon-manifest.json` | The MCP's entire control surface for the game |
+
+Without `rcon-manifest.json` the server deploys and runs but cannot be *driven*: the MCP
+has no commands, queries or cvars for it, so there is no map change, no player list, no
+settings. It is data, not code — the MCP runs what it declares and contains no
+game-specific logic — so a new game is a manifest, not a code change. Run
+`node apps/respawn-mcp/generate-manifests.mjs` after editing one; the bundle it writes is
+gitignored and rebuilt, and it validates the manifest as a side effect.
+
+**Env files layer, lowest precedence first.** A service does *not* declare the AWS target:
+
+| Layer | Holds |
+|-------|-------|
+| `.env.defaults` (workspace root) | Fleet-wide: `AWS_ACCOUNT_ID`, `AWS_REGION`, `AWS_PROFILE` |
+| `apps/<project>/.env` | Shared across a project's variants |
+| `apps/<...>/<service>/.env` | The service itself — always wins |
+
+Declaring the AWS target once is the point: sixteen copies drift, and one stale
+`AWS_ACCOUNT_ID` aims a deploy at the wrong account. Re-declare a key in a service's
+own `.env` only to put **that** service somewhere else — `apps/ut99/variants/modded`
+does exactly this. `deploy` preflights the declared account against
+`sts get-caller-identity` and refuses on a mismatch, so a wrong target fails before
+anything is created rather than silently succeeding in the wrong place.
 
 **Variants (one project, multiple builds).** A project can offer several builds — e.g.
 different mod sets — that deploy independently. Add a `variants/` dir; each
 `apps/<project>/variants/<variant>/` holds its own `.env`, `.env.example`, `Dockerfile`,
 and `rcon-manifest.json`, layered over a shared base `apps/<project>/.env` (the overlay
-wins on a key collision — put common knobs like ports/CPU/AWS in the base, deltas in the
-variant). Identity is author-controlled via each variant's `SERVICE_NAME`: the canonical
+wins on a key collision — put common knobs like ports/CPU in the base, deltas in the
+variant; the AWS target comes from `.env.defaults` above). Identity is author-controlled via each variant's `SERVICE_NAME`: the canonical
 build keeps the bare project name (`ut99`), others get a suffix (`ut99-vanilla`). A project
 with a `variants/` dir is represented **only** by its variants — the project dir itself is
 not a service. See `apps/ut99` (`modded` = roemer image; `vanilla` = bymatej image). Only
@@ -106,12 +129,29 @@ consumer reads discovery output, so a variant is a first-class service everywher
    config file from injected env vars, then `exec`s the upstream entrypoint.
    See `apps/gmod`, `apps/css` (LinuxGSM), `apps/cs16` (HLDS).
 
+   A shim is also the only durable home for a setting the image exposes no env var for.
+   `apps/ut99/variants/modded` is that case: it is `FROM` the upstream image and edits two
+   ini keys the image never surfaces. An rcon `set` is not an alternative — UE1 `set`
+   writes the in-memory class default, which dies with the task.
+
+**`UPDATE_CHECK` must match the image strategy**, and `loader.ts` refuses the mismatch:
+`image` requires `IMAGE_URI`, `build` requires its absence. Switching a service between
+strategies means changing both, and because `UPDATE_CHECK` is usually declared in a
+project's shared `.env`, a variant that builds locally while its siblings do not has to
+override it (see `apps/ut99/variants/modded`).
+
 **Secrets.** `SECRET_REFS` → ECS `secrets:` (never `environment:`). Set values with the
-`Secrets` CLI action, which writes to Secrets Manager / SSM over stdin. Interactive via
+`Secrets` CLI action, which writes to Secrets Manager / SSM. Interactive via
 `pnpm respawn` → Secrets; headless (for automation) pipes the value on stdin — never argv:
 `echo -n "$VALUE" | respawn --non-interactive --action secrets --service <svc> --secret <ENV_VAR>`.
 Naming: `respawn/<service>/<name>` (sm), `/respawn/<service>/<name>` (ssm).
 Full spec: `artifacts/AGENT_PROMPT.md` §7.
+
+**Secrets are per account AND per region.** They are not part of the stack, so moving a
+service to another account or region leaves them behind and the first deploy there fails
+preflight naming the missing entry. Recreate them against the new target before
+deploying — the same `SECRET_REFS` paths, written with the same command plus a
+`--profile` pointing at the new account.
 
 ---
 

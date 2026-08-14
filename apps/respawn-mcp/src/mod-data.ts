@@ -23,9 +23,22 @@ const ModEntrySchema = z
     package: z.string(),
     kind: z.enum(['gametype', 'mutator']),
     control: z.enum(['admin', 'player', 'passive']),
+    /**
+     * The class to name in a servertravel `?mutator=` list — the ONLY thing that
+     * actually turns a mutator on. Distinct from `package`, and routinely different
+     * from it (package MVE2h -> class MVES.MapVote), which is the trap this field
+     * exists to close: a wrong class is accepted silently and simply does nothing,
+     * because the UWeb console reports nothing either way.
+     *
+     * `null` means the mod has no mutator class and cannot be enabled this way — a
+     * client-side package, or a game type selected via `?game=` instead.
+     */
+    mutatorClass: z.string().nullable().optional(),
     /** The .ini it reads its config from, when it has one. */
     configFile: z.string().optional(),
     notes: z.string().optional(),
+    /** Set when the mod is known or suspected to misbehave on this image. */
+    unverified: z.boolean().optional(),
   })
   .strict();
 

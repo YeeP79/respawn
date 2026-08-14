@@ -7,8 +7,13 @@ const mockRunAws = vi.mocked(runAws);
 
 function ctx(overrides: Partial<ScaleContext> = {}): ScaleContext {
   return {
-    // Only the fields scale reads are needed.
-    service: { name: 'ut99', path: '', config: {} as never },
+    // Only the fields scale reads are needed — which now includes aws.region, since
+    // the region has to fall back to the service's config (there is no --region flag).
+    service: {
+      name: 'ut99',
+      path: '',
+      config: { aws: { region: 'us-east-2' } } as never,
+    },
     environment: 'dev',
     desiredCount: 1,
     ...overrides,
@@ -37,6 +42,22 @@ describe('scale (headless core)', () => {
       '--desired-count',
       '1',
     ]);
+  });
+
+  // Regression: scale passed `region: ctx.region` alone. There is no --region CLI flag,
+  // so that is normally undefined and the AWS CLI silently falls back to the profile's
+  // default region — for a service deployed elsewhere the lookup then finds nothing and
+  // is reported as "not deployed", which reads as a missing stack, not a bad query.
+  it('queries the region the service is configured for', async () => {
+    await scale(ctx({ desiredCount: 0 }));
+    const [, opts] = mockRunAws.mock.calls[0]!;
+    expect(opts).toMatchObject({ region: 'us-east-2' });
+  });
+
+  it('lets an explicit context region win over the service config', async () => {
+    await scale(ctx({ desiredCount: 0, region: 'eu-west-1' }));
+    const [, opts] = mockRunAws.mock.calls[0]!;
+    expect(opts).toMatchObject({ region: 'eu-west-1' });
   });
 
   it('frames desiredCount 0 as sleeping', async () => {

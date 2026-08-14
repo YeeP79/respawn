@@ -657,6 +657,12 @@ def _uweb_request(url: str, user: str, password: str, timeout: float, data: byte
         raise RconError(f"web admin returned HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise RconError(f"cannot reach web admin at {url}: {exc.reason}") from exc
+    except OSError as exc:
+        # ConnectionResetError and friends are raw OSErrors, NOT wrapped as URLError.
+        # Uncaught they surface as a Python traceback, which reads as a total failure of
+        # whatever the caller was doing — see the note in uweb_exec for why that is
+        # actively misleading here.
+        raise RconError(f"connection to web admin at {url} failed: {exc}") from exc
 
 
 # Page chrome in the log frame that carries no log content: the head (title + CSS),
@@ -698,8 +704,24 @@ def uweb_exec(host: str, port: int, password: str, command: str, timeout: float)
     user = os.environ.get("RCON_WRITE_USER", "")
     base = f"http://{host}:{port}"
     payload = urllib.parse.urlencode({"SendText": command, "Send": "Send"}).encode("latin-1")
+
+    # Dispatch. A failure HERE means the command never ran, and must propagate.
     _uweb_request(base + UWEB_CONSOLE_PATH, user, password, timeout, payload)
-    log = _uweb_request(base + UWEB_LOG_PATH, user, password, timeout, None)
+
+    # Read the reply back. A failure HERE is NOT a command failure — the command has
+    # already been accepted. The two are routinely different outcomes: `servertravel`
+    # tears down the web server while the level loads, so the log read that follows it
+    # is reset or refused precisely BECAUSE the command worked. Propagating that made a
+    # successful map change report as an error, which is worse than useless — it invites
+    # re-running a command that already took effect. Say what is actually known instead.
+    try:
+        log = _uweb_request(base + UWEB_LOG_PATH, user, password, timeout, None)
+    except RconError as exc:
+        return (
+            f"(command sent; console log could not be read back: {exc}. "
+            "This is expected for a command that restarts the level — confirm by effect, "
+            "not by this reply.)"
+        )
     return _uweb_parse_log(log) or "(command sent; web admin returned no console output)"
 
 

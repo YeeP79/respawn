@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomInt } from 'node:crypto';
 import {
   McpServer,
   ResourceTemplate,
@@ -42,6 +43,12 @@ import {
 import { resolveCvarCommand, resolveWireCommand } from './manifest.js';
 import { runQuery } from './query-engine.js';
 import {
+  parseTravelContext,
+  applyMutatorChanges,
+  buildTravelCommand,
+  unknownMutators,
+} from './mutators.js';
+import {
   discoverServices,
   synth as coreSynth,
   diff as coreDiff,
@@ -50,6 +57,8 @@ import {
   push as corePush,
   destroy as coreDestroy,
   scale as coreScale,
+  secretExists,
+  setSecret,
   type ActionResult,
   type DiscoveredService,
   type Environment,
@@ -83,10 +92,23 @@ const awsOpts = { region: REGION, profile: PROFILE };
 
 // Lifecycle tools (deploy/destroy/synth/...) read the repo — Dockerfiles, .env files,
 // the CDK app — unlike the control tools, which only need AWS. The repo root defaults
-// to cwd; set RESPAWN_WORKSPACE_ROOT when the MCP runs outside it. Mutating actions are
-// gated behind RESPAWN_ALLOW_DEPLOYS so an LLM cannot deploy or tear down by default.
+// to cwd; set RESPAWN_WORKSPACE_ROOT when the MCP runs outside it. Every mutating action
+// is gated off by default, so an LLM cannot deploy, scale or tear down unless asked to.
 const WORKSPACE_ROOT = process.env['RESPAWN_WORKSPACE_ROOT'] ?? process.cwd();
+// Three tiers rather than one flag, because the actions differ enormously in blast
+// radius and were previously all-or-nothing. Waking a server to play is the thing you
+// want constantly and can undo in one call; tearing a stack down is neither. Gating them
+// together meant enabling the routine case also handed out the irreversible one.
+//
+//   RESPAWN_ALLOW_SCALE    scale only — wake/sleep. Reversible, the common case.
+//   RESPAWN_ALLOW_DEPLOYS  deploy + push, and implies scale (a deploy already replaces
+//                          the running task, so withholding scale from it buys nothing).
+//   RESPAWN_ALLOW_DESTROY  destroy. Deliberately NOT implied by the above.
 const DEPLOYS_ALLOWED = process.env['RESPAWN_ALLOW_DEPLOYS'] === 'true';
+const SCALE_ALLOWED = DEPLOYS_ALLOWED || process.env['RESPAWN_ALLOW_SCALE'] === 'true';
+const DESTROY_ALLOWED = process.env['RESPAWN_ALLOW_DESTROY'] === 'true';
+/** Secrets are written, never read back, unless this is set. See generate_secret. */
+const SECRET_WRITES_ALLOWED = process.env['RESPAWN_ALLOW_SECRET_WRITES'] === 'true';
 
 /** Zod schema for the deploy environment, shared by the lifecycle tools. */
 const environmentSchema = z
@@ -293,6 +315,263 @@ server.registerTool(
     // Commands change state → the write transport (RCON_WRITE_*), which for UT99 is
     // the authenticated uweb admin console rather than the read-only gamespy port.
     return runAndFormat(service, rcon, { write: true });
+  },
+);
+
+server.registerTool(
+  'check_secrets',
+  {
+    title: 'Check secrets exist',
+    description:
+      "Report which of a service's SECRET_REFS already exist in Secrets Manager / SSM, " +
+      'and which are missing. Read-only: it never returns a secret VALUE, only whether ' +
+      'each one is present. Run this before a first deploy — ECS resolves secrets before ' +
+      'the container starts, so a missing one fails the task after a full deploy. Secrets ' +
+      'live per account AND per region, so moving a service leaves them behind.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "ut99"'),
+      environment: environmentSchema,
+    },
+  },
+  async ({ service, environment }) => {
+    const config = resolveConfiguredService(service, environment).config;
+    const region = config.aws.region ?? REGION;
+    const refs = config.secretRefs;
+    if (refs.length === 0) return textResult(`${service} declares no SECRET_REFS.`);
+
+    const checked = await Promise.all(
+      refs.map(async (ref) => ({
+        ref,
+        exists: await secretExists({
+          store: ref.store,
+          sourceId: ref.sourceId,
+          region,
+          ...(PROFILE ? { profile: PROFILE } : {}),
+        }),
+      })),
+    );
+    const missing = checked.filter((c) => !c.exists);
+    const lines = [
+      `${service} secrets in ${region} (account of profile ${PROFILE ?? '(default)'}):`,
+      ...checked.map(
+        ({ ref, exists }) =>
+          `  ${exists ? '✓' : '✗'} ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId}`,
+      ),
+    ];
+    if (missing.length > 0) {
+      lines.push(
+        '',
+        `${missing.length} missing — a deploy would fail preflight. Create each with ` +
+          'generate_secret, or the Secrets CLI action if you need a specific value.',
+      );
+    }
+    return textResult(lines.join('\n'), missing.length > 0);
+  },
+);
+
+server.registerTool(
+  'generate_secret',
+  {
+    title: 'Generate and store a secret',
+    description:
+      "Generate a strong random value for one of a service's SECRET_REFS and store it. " +
+      'Generating server-side is deliberate: a tool that ACCEPTED a value would copy that ' +
+      'plaintext into the conversation transcript, which is exactly what keeping secrets ' +
+      'out of argv and task definitions is meant to prevent. The value is therefore not ' +
+      'returned unless reveal=true, which you need for a password humans must type (a ' +
+      'game join password) and should not use otherwise. Overwrites an existing value.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "ut99"'),
+      secret: z
+        .string()
+        .describe('Container env var name from SECRET_REFS, e.g. "UT_GAMEPWD"'),
+      environment: environmentSchema,
+      length: z
+        .number()
+        .int()
+        .min(8)
+        .max(128)
+        .default(24)
+        .describe('Character count. Keep it typeable for a password players enter.'),
+      reveal: z
+        .boolean()
+        .default(false)
+        .describe('Return the value in the reply, putting it in the transcript. Opt-in.'),
+    },
+  },
+  async ({ service, secret, environment, length, reveal }) => {
+    if (!SECRET_WRITES_ALLOWED) {
+      return textResult(
+        'Secret writes are disabled. Set RESPAWN_ALLOW_SECRET_WRITES=true to enable ' +
+          'generate_secret; check_secrets is read-only and always available.',
+        true,
+      );
+    }
+    const config = resolveConfiguredService(service, environment).config;
+    const ref = config.secretRefs.find((r) => r.containerEnvVar === secret);
+    if (!ref) {
+      const known = config.secretRefs.map((r) => r.containerEnvVar).join(', ') || '(none)';
+      return textResult(
+        `${service} has no SECRET_REFS entry named "${secret}". Declared: ${known}. ` +
+          'Add it to SECRET_REFS in the service .env first — this tool only fills in a ' +
+          'secret the config already references.',
+        true,
+      );
+    }
+
+    // Alphanumeric only: these are typed by hand into a game console, where a symbol is
+    // a support request. randomInt is rejection-sampled, so the distribution stays even.
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const value = Array.from(
+      { length },
+      () => ALPHABET[randomInt(ALPHABET.length)]!,
+    ).join('');
+
+    const region = config.aws.region ?? REGION;
+    await setSecret({
+      store: ref.store,
+      sourceId: ref.sourceId,
+      value,
+      region,
+      ...(PROFILE ? { profile: PROFILE } : {}),
+    });
+
+    const lines = [
+      `Stored ${ref.store}:${ref.sourceId} (${service}/${secret}) in ${region} — ${length} chars.`,
+      reveal
+        ? `  value: ${value}`
+        : '  value withheld; pass reveal=true if a human needs to type it.',
+      '  Takes effect on the next task start: ECS injects secrets at start, so a running',
+      '  server keeps the old value until it is restarted.',
+    ];
+    return textResult(lines.join('\n'));
+  },
+);
+
+server.registerTool(
+  'set_mutators',
+  {
+    title: 'Turn mutators on or off',
+    description:
+      'Add or remove mutators on a running UE1 server (map voting, relics, and so on) ' +
+      'without disturbing the current map, game type or match settings. Prefer this over ' +
+      'hand-writing a servertravel: the mutator list is ABSOLUTE, so a travel that forgets ' +
+      'a running mutator silently switches it off. Reloads the current map, which resets ' +
+      'scores but keeps players connected. Use get_server_options to see each mod and its ' +
+      'mutatorClass.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "ut99"'),
+      add: z
+        .array(z.string())
+        .optional()
+        .describe('Mutator CLASSES to enable, e.g. ["Relics.RelicSpeed"] (not package names)'),
+      remove: z
+        .array(z.string())
+        .optional()
+        .describe('Mutator classes to disable, matched case-insensitively'),
+    },
+  },
+  async ({ service, add, remove }) => {
+    if (!add?.length && !remove?.length) {
+      return textResult('Nothing to do: pass add and/or remove.', true);
+    }
+
+    // The running set comes from the engine's own LoadMap line, not the `rules` query —
+    // rules reports display names ("MapVote MVE2h"), which cannot be turned back into
+    // the classes a travel needs.
+    const { events } = await fetchLogs(service, awsOpts, {
+      container: 'game-server',
+      pattern: 'LoadMap',
+      minutes: 1440,
+      limit: 50,
+    });
+    const context = parseTravelContext(events.map((e) => e.message ?? ''));
+    if (!context) {
+      return textResult(
+        `Could not read ${service}'s current map and mutators from its logs, so changing ` +
+          `them would mean guessing — and a wrong guess silently drops whatever is running. ` +
+          `Check the server is up (server_health) and has changed level at least once.`,
+        true,
+      );
+    }
+
+    const next = applyMutatorChanges(context.mutators, {
+      ...(add ? { add } : {}),
+      ...(remove ? { remove } : {}),
+    });
+    if (
+      next.length === context.mutators.length &&
+      next.every((m, i) => m === context.mutators[i])
+    ) {
+      return textResult(
+        `No change: ${service} is already running exactly [${next.join(', ') || 'none'}].`,
+      );
+    }
+
+    // A class the manifest does not know is not refused — a server may legitimately run
+    // one — but it is called out, because a misspelled class produces NO error anywhere:
+    // the console accepts it and the engine skips it.
+    const known = (getManifest(service)?.modData as { mutatorClass?: string | null }[] | undefined)
+      ?.map((m) => m.mutatorClass)
+      .filter((c): c is string => typeof c === 'string' && c.length > 0);
+    const unknown = known?.length ? unknownMutators(add ?? [], known) : [];
+
+    const command = buildTravelCommand({
+      map: context.map,
+      gametype: context.gametype,
+      mutators: next,
+      extras: context.extras,
+    });
+
+    const target = await resolveTarget(service);
+    const issuedAt = Date.now();
+    const sent = await execRcon(target, command, undefined, { write: true });
+    // A non-zero exit is a real dispatch failure and must not be reported as success.
+    // It does NOT include the transport error a successful travel provokes while the
+    // level reloads — rcon.py returns that as ordinary output, not a failure.
+    if (sent.exitCode !== 0) {
+      return textResult(
+        `${service}: the travel was not accepted, so mutators are unchanged.\n` +
+          `  command: ${command}\n  ${sent.output || '(no output)'}`,
+        true,
+      );
+    }
+
+    // Never report the rcon reply as the outcome: a travel that SUCCEEDS commonly answers
+    // with a transport error, because the level change tears down the web admin while the
+    // reply is being read. Confirm from the engine log instead — but only lines written
+    // AFTER the travel was issued. A wider window picks up the PREVIOUS level's load and
+    // "confirms" the mutator set we just replaced, which looks like the change silently
+    // failed. CloudWatch also lags a few seconds behind the engine, so an empty result
+    // here means "too early to tell", never "it did not work".
+    const after = await fetchLogs(service, awsOpts, {
+      container: 'game-server',
+      pattern: 'Add mutator',
+      minutes: 5,
+      limit: 60,
+    });
+    const loaded = after.events
+      .filter((e) => (e.timestamp ?? 0) >= issuedAt)
+      .map((e) => /Add mutator\s+(\S+)/.exec(e.message ?? '')?.[1])
+      .filter((c): c is string => Boolean(c));
+
+    const lines = [
+      `${service}: reloaded ${context.map} (${context.gametype}).`,
+      `  was:  ${context.mutators.join(', ') || '(none)'}`,
+      `  now:  ${next.join(', ') || '(none)'}`,
+      loaded.length
+        ? `  engine confirmed loading: ${[...new Set(loaded)].join(', ')}`
+        : '  the travel was accepted, but the engine has not logged "Add mutator" yet — ' +
+          'CloudWatch lags the server by a few seconds. Re-check with server_logs; do NOT ' +
+          'reissue on the strength of this line.',
+    ];
+    if (unknown.length) {
+      lines.push(
+        `  WARNING: not in ${service}'s manifest: ${unknown.join(', ')}. A misspelled class ` +
+          `fails silently, so verify it appears in the confirmed list above.`,
+      );
+    }
+    return textResult(lines.join('\n'));
   },
 );
 
@@ -737,7 +1016,7 @@ server.registerTool(
   },
   async ({ service, environment }) => {
     if (!DEPLOYS_ALLOWED) {
-      return textResult('Deploys are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+      return textResult('Deploys are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy and push.', true);
     }
     return actionResult(
       await coreDeploy({
@@ -759,7 +1038,7 @@ server.registerTool(
   },
   async ({ service, environment }) => {
     if (!DEPLOYS_ALLOWED) {
-      return textResult('Pushes are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy.', true);
+      return textResult('Pushes are disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy and push.', true);
     }
     return actionResult(await corePush(actionContext(resolveConfiguredService(service, environment), environment)));
   },
@@ -779,8 +1058,12 @@ server.registerTool(
     },
   },
   async ({ service, environment, confirm }) => {
-    if (!DEPLOYS_ALLOWED) {
-      return textResult('Destroy is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable it.', true);
+    if (!DESTROY_ALLOWED) {
+      return textResult(
+        'Destroy is disabled. Set RESPAWN_ALLOW_DESTROY=true to enable it — deliberately ' +
+          'its own flag, so allowing deploys or scaling never allows a teardown.',
+        true,
+      );
     }
     if (confirm !== service) {
       return textResult(`Confirmation mismatch: pass confirm="${service}" to destroy it.`, true);
@@ -816,8 +1099,12 @@ server.registerTool(
     },
   },
   async ({ service, environment, desiredCount }) => {
-    if (!DEPLOYS_ALLOWED) {
-      return textResult('Scaling is disabled. Set RESPAWN_ALLOW_DEPLOYS=true to enable deploy/push/destroy/scale.', true);
+    if (!SCALE_ALLOWED) {
+      return textResult(
+        'Scaling is disabled. Set RESPAWN_ALLOW_SCALE=true to allow waking and sleeping ' +
+          'servers without also allowing deploys or destroys.',
+        true,
+      );
     }
     return actionResult(
       await coreScale({

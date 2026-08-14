@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       dryRun: args.dryRun,
       ...(args.requireApproval ? { requireApproval: args.requireApproval } : {}),
       ...(args.profile ? { profile: args.profile } : {}),
+      ...(args.region ? { region: args.region } : {}),
       ...(args.count !== undefined ? { desiredCount: args.count } : {}),
       ...(args.gameEnv ? { gameEnvOverrides: args.gameEnv } : {}),
     });
@@ -82,6 +83,7 @@ async function main(): Promise<void> {
     workspaceRoot: args.workspaceRoot,
     verbose: args.verbose,
     ...(args.profile ? { profile: args.profile } : {}),
+    ...(args.region ? { region: args.region } : {}),
   });
   process.exit(result.success ? 0 : 1);
 }

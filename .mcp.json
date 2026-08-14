@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "respawn": {
+      "command": "node",
+      "args": ["apps/respawn-mcp/dist/index.mjs"],
+      "env": {
+        "RESPAWN_PROFILE": "respawn",
+        "RESPAWN_REGION": "us-east-1",
+        "RESPAWN_ALLOW_SCALE": "true",
+        "RESPAWN_ALLOW_DEPLOYS": "true",
+        "RESPAWN_ALLOW_SECRET_WRITES": "true"
+      }
+    },
+    "respawn-nw-dev": {
+      "command": "node",
+      "args": ["apps/respawn-mcp/dist/index.mjs"],
+      "env": {
+        "RESPAWN_PROFILE": "marketplace-dev--admin",
+        "RESPAWN_REGION": "us-east-2",
+        "RESPAWN_ALLOW_SCALE": "true"
+      }
+    }
+  }
+}

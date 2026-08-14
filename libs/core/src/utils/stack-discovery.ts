@@ -15,7 +15,7 @@ import { logger } from './logger.js';
 function loadService(
   serviceDir: string,
   environment: Environment,
-  baseEnvPath: string | undefined,
+  baseEnvPaths: readonly string[],
   label: string,
 ): GameServerConfig | undefined {
   const hasDockerfile = fs.existsSync(path.join(serviceDir, 'Dockerfile'));
@@ -33,7 +33,7 @@ function loadService(
     }
   }
   try {
-    const config = loadConfig(serviceDir, environment, baseEnvPath);
+    const config = loadConfig(serviceDir, environment, baseEnvPaths);
     logger.debug(`Discovered service: ${config.serviceName}`);
     return config;
   } catch (err) {
@@ -50,6 +50,15 @@ export function discoverServices(
 ): DiscoveredService[] {
   const appsDir = path.join(workspaceRoot, 'apps');
   const services: DiscoveredService[] = [];
+
+  // Fleet-wide defaults, layered under every service. Exists so the AWS target is
+  // declared in ONE place: without it all 16 services repeat the same three AWS_* lines,
+  // and the copies drift — one stale AWS_ACCOUNT_ID is enough to aim a deploy at the
+  // wrong account. A service still overrides any key locally, which is how a single
+  // service lives in a different account from the rest. Optional: absent means the old
+  // behavior, every service declaring its own.
+  const defaultsPath = path.join(workspaceRoot, '.env.defaults');
+  const workspaceDefaults = fs.existsSync(defaultsPath) ? [defaultsPath] : [];
 
   if (!fs.existsSync(appsDir)) {
     logger.warn(`Apps directory not found: ${appsDir}`);
@@ -73,19 +82,21 @@ export function discoverServices(
     // dir-name and serviceName identities in sync for a variant).
     if (fs.existsSync(variantsDir) && fs.statSync(variantsDir).isDirectory()) {
       const projectEnv = path.join(dir, '.env');
-      const baseEnvPath = fs.existsSync(projectEnv) ? projectEnv : undefined;
+      const bases = fs.existsSync(projectEnv)
+        ? [...workspaceDefaults, projectEnv]
+        : workspaceDefaults;
       for (const variant of fs.readdirSync(variantsDir, { withFileTypes: true })) {
         if (!variant.isDirectory()) continue;
         const variantDir = path.join(variantsDir, variant.name);
         const label = `${entry.name}/${variant.name}`;
-        const config = loadService(variantDir, environment, baseEnvPath, label);
+        const config = loadService(variantDir, environment, bases, label);
         if (config) services.push({ name: config.serviceName, path: variantDir, config });
       }
       continue;
     }
 
     // Flat project: today's behavior, keyed on the directory name.
-    const config = loadService(dir, environment, undefined, entry.name);
+    const config = loadService(dir, environment, workspaceDefaults, entry.name);
     if (config) services.push({ name: entry.name, path: dir, config });
   }
 

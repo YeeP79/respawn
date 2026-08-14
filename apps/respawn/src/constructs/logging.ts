@@ -47,6 +47,35 @@ export interface GameServerLoggingProps {
   retentionDays: number;
 }
 
+/**
+ * Masks a join/connect password out of the log stream.
+ *
+ * Game engines log the client's full connect URL on every login, and for a
+ * password-protected server that URL carries the password in the clear. Verified on
+ * ut99, where each join writes:
+ *
+ *   Login request: CTF-Gauntlet.unr?Name=...?password=<secret>?game=Botpack.CTFGame
+ *
+ * That turns a Secrets Manager value into something any reader of the log group can
+ * lift, which is a far wider audience than the people meant to have it. The engine
+ * decides what it logs and takes no flag to stop, and the awslogs driver cannot
+ * filter, so masking at the log group is the only interception point short of a
+ * FireLens sidecar.
+ *
+ * Deliberately matched on the generic `password=` rather than anything ut99-specific:
+ * this construct backs every game, and a connect string in a URL query is the common
+ * shape across them.
+ *
+ * Two limits worth knowing. Masking applies at ingestion, so it does NOT retroactively
+ * mask events already written — an exposed password stays exposed in the existing
+ * stream and must be rotated. And data protection bills per GB scanned, on top of
+ * ingestion.
+ */
+const JOIN_PASSWORD_IDENTIFIER = new logs.CustomDataIdentifier(
+  'JoinPassword',
+  '[Pp]assword=[^?&\\s]+',
+);
+
 export class GameServerLogging extends Construct {
   public readonly logGroup: logs.LogGroup;
 
@@ -57,6 +86,11 @@ export class GameServerLogging extends Construct {
       logGroupName: logGroupName(props.environment, props.serviceName),
       retention: mapRetentionDays(props.retentionDays),
       removalPolicy: RemovalPolicy.DESTROY,
+      dataProtectionPolicy: new logs.DataProtectionPolicy({
+        name: 'respawn-mask-credentials',
+        description: 'Masks connect-URL passwords the game engine logs on login',
+        identifiers: [JOIN_PASSWORD_IDENTIFIER],
+      }),
     });
   }
 }

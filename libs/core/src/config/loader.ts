@@ -528,14 +528,27 @@ function readEnvFile(filePath: string): Record<string, string> {
 export function loadConfig(
   servicePath: string,
   environment: Environment,
-  baseEnvPath?: string,
+  baseEnvPaths?: string | readonly string[],
 ): GameServerConfig {
-  // A variant layers its own `.env` over a shared project `.env` (baseEnvPath): the
-  // base holds knobs common to every variant, the overlay only the deltas. The
-  // overlay wins on a key collision. `servicePath` stays the variant dir, so
-  // SERVICE_NAME, DOCKERFILE_PATH, SECRET_REFS and GAME_ENV_* all resolve per variant.
-  const base = baseEnvPath ? readEnvFile(baseEnvPath) : {};
-  const env: Record<string, string> = { ...base, ...readEnvFile(path.join(servicePath, '.env')) };
+  // Env files layer, lowest precedence first, with the service's own `.env` last and
+  // always winning. `baseEnvPaths` is that lower stack, in ascending precedence:
+  //
+  //   <workspace>/.env.defaults   fleet-wide defaults (AWS account/region/profile)
+  //   apps/<project>/.env         shared across a project's variants
+  //   apps/<...>/<service>/.env   the service itself — always wins
+  //
+  // A single string is still accepted for the common two-layer variant case.
+  // `servicePath` stays the service dir, so SERVICE_NAME, DOCKERFILE_PATH, SECRET_REFS
+  // and GAME_ENV_* all resolve per service rather than being inherited by accident.
+  const bases =
+    baseEnvPaths === undefined
+      ? []
+      : typeof baseEnvPaths === 'string'
+        ? [baseEnvPaths]
+        : baseEnvPaths;
+  const env: Record<string, string> = {};
+  for (const basePath of bases) Object.assign(env, readEnvFile(basePath));
+  Object.assign(env, readEnvFile(path.join(servicePath, '.env')));
 
   const serviceName =
     env['SERVICE_NAME'] || path.basename(servicePath);
