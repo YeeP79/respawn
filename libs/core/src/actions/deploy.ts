@@ -1,4 +1,5 @@
 import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
+import { resolveCallerIdentity } from '../aws/identity.js';
 import { findUnsatisfiedRequirements, formatRequirementError } from '../config/preflight.js';
 import { runCdk } from '../utils/cdk-runner.js';
 import { logger } from '../utils/logger.js';
@@ -14,6 +15,8 @@ export interface DeployContext {
   verbose?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
+  /** Overrides the service's configured region; unset means config.aws.region. */
+  region?: string;
   force?: boolean;
   /** Deploy-time prompt answers — container env var → value (overrides .env). */
   gameEnvOverrides?: Record<string, string>;
@@ -42,8 +45,46 @@ async function preflight(ctx: DeployContext): Promise<void> {
     problems.push(formatRequirementError(config, missing));
   }
 
-  const region = config.aws.region;
+  const region = ctx.region ?? config.aws.region;
   const profile = ctx.profile ?? config.aws.profile;
+
+  // Which account the credentials belong to is set independently of which account the
+  // deploy targets, so check they agree before anything is created. Getting this wrong
+  // is quiet and expensive: a deploy into the wrong account succeeds, and the servers
+  // it leaves behind are somewhere nobody is looking. This also converts an expired SSO
+  // session — otherwise reported by CDK as "Unable to resolve AWS account to use",
+  // which never mentions credentials — into an instruction to log in.
+  // Both failures below stop preflight immediately rather than collecting a problem.
+  // Every remaining check is an authenticated call scoped to an account, so if the
+  // session is dead or pointed at the wrong account they all "fail" and report their
+  // subject as missing — the secret check announces that secrets which exist perfectly
+  // well do not, which invites someone to go and recreate them. One accurate error
+  // beats three misleading ones.
+  const bail = (detail: string): never => {
+    throw new Error(`Preflight failed.\n\n${[...problems, detail].join('\n\n')}`);
+  };
+
+  let identity;
+  try {
+    identity = await resolveCallerIdentity({ profile, region });
+  } catch (err) {
+    bail(err instanceof Error ? err.message : String(err));
+  }
+
+  if (config.aws.accountId && identity!.accountId !== config.aws.accountId) {
+    bail(
+      [
+        `${config.serviceName} declares AWS_ACCOUNT_ID=${config.aws.accountId}, but the ` +
+          `credentials in use belong to ${identity!.accountId}.`,
+        `  identity: ${identity!.arn}`,
+        `  profile:  ${profile ?? '(default)'}`,
+        '',
+        'Deploying would create this service in the wrong account. Point --profile at',
+        "the declared account, or correct AWS_ACCOUNT_ID in the service's .env.",
+      ].join('\n'),
+    );
+  }
+
   const absent = (
     await Promise.all(
       config.secretRefs.map(async (ref) => ({

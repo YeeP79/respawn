@@ -45,6 +45,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# The fleet-wide AWS defaults every service layers under. The real file holds an account
+# id, so only the template is tracked — `.env.*` above would otherwise swallow it too.
+!.env.defaults.example
 
 # Coverage
 coverage/

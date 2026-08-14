@@ -64,6 +64,57 @@ const discoveredServices = serviceNames.map((name) => {
 const otherServices = allDiscovered.filter((s) => !requestedNames.has(s.name));
 const allServices = [...discoveredServices, ...otherServices];
 
+// Every stack in one synth shares a single environment: each service stack references
+// the shared stack's VPC, and CDK rejects a cross-*region* reference outright (the
+// synth throws before anything deploys). Two consequences.
+//
+// First, the requested services must agree on a region. They almost always do; when
+// they do not, say so plainly here rather than let CDK report it as an unresolvable
+// reference between two stack names, which does not hint at the .env that caused it.
+const requestedRegions = [
+  ...new Set(discoveredServices.map((s) => s.config.aws.region)),
+];
+if (requestedRegions.length > 1) {
+  const byRegion = discoveredServices
+    .map((s) => `  ${s.name}: ${s.config.aws.region}`)
+    .join('\n');
+  throw new Error(
+    `Cannot deploy services from different regions in one run — they share a VPC ` +
+      `from the shared stack, and CDK does not allow a cross-region reference to it.\n` +
+      `${byRegion}\n` +
+      `Deploy one region at a time, or align AWS_REGION across these services' .env files.`,
+  );
+}
+
+// Second, the synth-only stacks (everything not requested) must be pinned to that
+// same region instead of their own .env. They are never deployed — they exist only so
+// the shared stack's exports stay stable, per the note above — so their region is
+// immaterial, but leaving it at the .env value makes them reference the shared VPC
+// across regions and fail the synth. This is what lets one service be retargeted to
+// another account/region while the rest of the fleet stays put.
+const synthRegion = discoveredServices[0]?.config.aws.region ?? 'us-east-1';
+
+// The declared account wins over CDK_DEFAULT_ACCOUNT. Those two are independent —
+// AWS_ACCOUNT_ID is a value in .env, CDK_DEFAULT_ACCOUNT comes from whichever profile
+// the CLI resolved — and nothing used to reconcile them, so declaring one account and
+// running with another profile deployed to the profile's account without a word.
+// Preferring the declaration makes the .env the single source of truth and turns that
+// silent mistake into a loud one: CloudFormation refuses to touch a stack whose
+// template targets an account the credentials do not belong to.
+const requestedAccounts = [
+  ...new Set(discoveredServices.map((s) => s.config.aws.accountId).filter(Boolean)),
+];
+if (requestedAccounts.length > 1) {
+  const byAccount = discoveredServices
+    .map((s) => `  ${s.name}: ${s.config.aws.accountId ?? '(unset)'}`)
+    .join('\n');
+  throw new Error(
+    `Cannot deploy services from different AWS accounts in one run — they share the ` +
+      `shared stack's VPC, and one synth targets one account.\n${byAccount}`,
+  );
+}
+const synthAccount = requestedAccounts[0] ?? process.env['CDK_DEFAULT_ACCOUNT'];
+
 const allEcrServices = allServices.filter((s) => !s.config.image.imageUri);
 const allImageUriServices = allServices.filter((s) => !!s.config.image.imageUri);
 
@@ -72,8 +123,8 @@ const sharedStack = new SharedStack(app, sharedStackId(environment), {
   environment,
   services: allEcrServices,
   env: {
-    account: process.env['CDK_DEFAULT_ACCOUNT'],
-    region: discoveredServices[0]?.config.aws.region ?? 'us-east-1',
+    account: synthAccount,
+    region: synthRegion,
   },
 });
 
@@ -92,8 +143,8 @@ for (const svc of allEcrServices) {
     // others are synthesized but not deployed, so their tag is immaterial.
     imageTag: requestedNames.has(svc.name) ? imageTag : `${environment}-latest`,
     env: {
-      account: process.env['CDK_DEFAULT_ACCOUNT'],
-      region: svc.config.aws.region,
+      account: synthAccount,
+      region: synthRegion,
     },
   });
 
@@ -107,8 +158,8 @@ for (const svc of allImageUriServices) {
     vpc: sharedStack.vpc,
     imageUri: svc.config.image.imageUri,
     env: {
-      account: process.env['CDK_DEFAULT_ACCOUNT'],
-      region: svc.config.aws.region,
+      account: synthAccount,
+      region: synthRegion,
     },
   });
 

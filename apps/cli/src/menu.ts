@@ -17,6 +17,8 @@ export async function runCli(options: {
   workspaceRoot: string;
   verbose?: boolean;
   profile?: string;
+  /** Overrides every action's region; unset means each service's own AWS_REGION. */
+  region?: string;
 }): Promise<{ success: boolean }> {
   if (options.verbose) setVerbose(true);
 
@@ -189,6 +191,7 @@ export async function runCli(options: {
       workspaceRoot: options.workspaceRoot,
       verbose: options.verbose,
       profile: options.profile,
+      region: options.region,
       gameEnvOverrides: deployOverrides.get(service.name),
       ...(scaleCount !== undefined ? { desiredCount: scaleCount } : {}),
     });

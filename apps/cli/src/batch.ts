@@ -17,6 +17,13 @@ export interface BatchOptions {
   dryRun?: boolean;
   requireApproval?: 'never' | 'any-change' | 'broadening';
   profile?: string;
+  /**
+   * Overrides the region every action talks to. Normally unset, in which case each
+   * action falls back to its service's AWS_REGION. Must be threaded through: `--region`
+   * is parsed and exported to child processes, but an action reading `ctx.region` sees
+   * undefined unless it also arrives here.
+   */
+  region?: string;
   /** ECS desiredCount — required when action is `scale`. */
   desiredCount?: number;
   /** Deploy-time env overrides (deploy-prompt answers), applied to every service. */
@@ -60,6 +67,7 @@ export async function runBatch(options: BatchOptions): Promise<number> {
       workspaceRoot: options.workspaceRoot,
       verbose: options.verbose,
       profile: options.profile,
+      region: options.region,
       force: options.force,
       forceBuild: options.forceBuild,
       requireImage: options.requireImage,

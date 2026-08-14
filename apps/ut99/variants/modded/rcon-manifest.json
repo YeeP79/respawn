@@ -1,28 +1,31 @@
 {
   "displayName": "Unreal Tournament 99",
   "engine": "other",
-  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) \u2014 the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs. ADMIN SURFACE \u2014 what is PROVEN vs what is NOT. The UWeb console runs `Level.ConsoleCommand`. PROVEN WORKING by observed effect: `servertravel` (map changes), `set`/`get` (value reads back), `say` (appears as 'Admin:'). UNVERIFIED: `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` \u2014 the UT99 source says these are `exec function`s on PlayerPawn and the web console has no PlayerPawn, so they may silently do nothing; but this could NOT be confirmed, because bots do not spawn on an empty server (UT99 waits for a human before starting the match) and GameSpy `numplayers`/`\\players\\` do not count bots anyway. They are kept, flagged `unverified`. \u26a0\ufe0f CRITICAL: the console gives NO feedback. A pure garbage command returns the SAME '(command sent; web admin returned no console output)' as `servertravel`. So that reply is NEVER evidence a command worked \u2014 ALWAYS confirm by effect (a follow-up query). NOTE: UE1 `set` writes the CLASS DEFAULT, so a cvar takes effect on the NEXT map \u2014 pair it with `change_map` to apply it now.",
+  "notes": "UT99 has no native rcon, so control is split across two transports the sidecar speaks over loopback. READS use GameSpy v1 on the query port (game port + 1): unauthenticated, read-only, backing the queries below. WRITES use the UWeb admin console on 5580 (HTTP Basic auth) — the same command interpreter an in-game admin reaches after `adminlogin`, verified against roemer/ut99-server. Commands are sent verbatim through that console; the reply is the recent console-log tail, so a command's effect is best confirmed with a follow-up query (e.g. `server_info` after `change_map`). The map-change verb is `servertravel`, NOT `switchlevel` (which is a no-op through the web console). Finer match settings go via servertravel URL params through the `rcon` escape hatch, e.g. `servertravel CTF-Face.unr?game=Botpack.CTFGame?timelimit=20?mutator=Pkg.Mut`. The shipped mutators are mostly passive (FlagAnnouncementsV2, ZeroPingPlus103, NoSelfDamage, KickIdlePlayers2, WhoPushedMe) or player-side (CustomCrossHairScale `mutate ch_scale`, MVE `!v`) and have no admin control surface; the `rules` query surfaces which are active. The query port exposes no IPs. ADMIN SURFACE — what is PROVEN vs what is NOT. The UWeb console runs `Level.ConsoleCommand`. PROVEN WORKING by observed effect: `servertravel` (map changes), `set`/`get` (value reads back), `say` (appears as 'Admin:'). UNVERIFIED: `Kick`, `AddBots`, `KillAll`, `Pause`, `Mutate` — the UT99 source says these are `exec function`s on PlayerPawn and the web console has no PlayerPawn, so they may silently do nothing; but this could NOT be confirmed, because bots do not spawn on an empty server (UT99 waits for a human before starting the match) and GameSpy `numplayers`/`\\players\\` do not count bots anyway. They are kept, flagged `unverified`. ⚠️ CRITICAL: the console gives NO feedback. A pure garbage command returns the SAME '(command sent; web admin returned no console output)' as `servertravel`. So that reply is NEVER evidence a command worked — ALWAYS confirm by effect (a follow-up query). NOTE: UE1 `set` writes the CLASS DEFAULT, so a cvar takes effect on the NEXT map — pair it with `change_map` to apply it now. VERIFICATION SEMANTICS (measured 2026-08-13/14, trust these over the reply text). `set`/`get` DO self-verify: they answer 'Property <Class>.<Prop> modified to \"X\", final result is \"X\"', so a set is confirmed by its own reply. `servertravel` does NOT — and worse, a travel that SUCCEEDS often returns a transport ERROR, because the level change tears down the UWeb server while the reply is being read. A ConnectionReset or Connection-refused on a travel therefore means nothing either way; confirm the map by a follow-up server_info. MUTATORS: the `?mutator=` list is ABSOLUTE — whatever a travel sends REPLACES the running set, so every mutator wanted must be named on EVERY travel; omitting one is how map voting silently switches itself off. A mutator only runs if it is in that list: having its package in ServerPackages merely replicates it to clients. Mutator CLASS names are in modData.mutatorClass and frequently differ from the package name (MVE2h -> MVES.MapVote), and a wrong class fails silently. The `rules` query reports `mutators=` EMPTY for a second or two during a level load, so a query fired right after a travel reads as 'no mutators' even when they loaded fine; the game-server log ('Add mutator <Class>') is authoritative in that window. TIMELIMIT: MVE opens its vote at MATCH END, so with timelimit=0 a match that never reaches fraglimit never ends and the vote never opens — which presents as 'the vote doesn't come up every time' and strands players on the scoreboard.",
   "modData": [
     {
       "name": "CustomCrossHairScale",
       "package": "CCHS4",
       "kind": "mutator",
       "control": "player",
-      "notes": "Players adjust crosshair size with `mutate ch_scale N`."
+      "notes": "Players adjust crosshair size with `mutate ch_scale N`. Client-side only: prepare.py deletes CCHS4.int, so there is no mutator class and it cannot be enabled via ?mutator=. It ships via ServerPackages.",
+      "mutatorClass": null
     },
     {
       "name": "FlagAnnouncementsV2",
       "package": "FlagAnnouncementsV2",
       "kind": "mutator",
       "control": "passive",
-      "configFile": "FlagAnnouncements.ini"
+      "configFile": "FlagAnnouncements.ini",
+      "mutatorClass": "FlagAnnouncementsV2.FlagAnnouncements"
     },
     {
       "name": "KickIdlePlayers2",
       "package": "KickIdlePlayers2",
       "kind": "mutator",
       "control": "passive",
-      "configFile": "KickIdlePlayers2.ini"
+      "configFile": "KickIdlePlayers2.ini",
+      "mutatorClass": "KickIdlePlayers2.KickIdlePlayers2"
     },
     {
       "name": "MapVoteExtended",
@@ -30,75 +33,571 @@
       "kind": "mutator",
       "control": "player",
       "configFile": "MVE_Config.ini",
-      "notes": "Post-map vote; players open it with the `!v` chat command."
+      "notes": "Post-map vote; players open it with the `!v` chat command. Class lives in MVES.u; MVE2h is the client-side ClientPackage. ?mutator=MVE2h.MapVote is wrong and fails silently.",
+      "mutatorClass": "MVES.MapVote"
     },
     {
       "name": "VoteSys",
       "package": "VoteSys_v12",
       "kind": "mutator",
       "control": "player",
-      "notes": "Alternative voting system (image marks it as testing)."
+      "notes": "Alternative voting system (image marks it as testing). A SECOND map-vote system. Do not run alongside MVES.MapVote.",
+      "mutatorClass": "VoteSys_v12.MutVoteSys"
     },
     {
       "name": "WhoPushedMe",
       "package": "WhoPushedMe",
       "kind": "mutator",
-      "control": "passive"
+      "control": "passive",
+      "mutatorClass": "WhoPushedMe.WhoPushedMe"
     },
     {
       "name": "ZeroPingPlus103",
       "package": "ZeroPingPlus103",
       "kind": "mutator",
       "control": "passive",
-      "notes": "Client-side hit detection."
+      "notes": "Client-side hit detection. VERIFIED BROKEN on this image 2026-08-13: with it active the map had no pickup weapons. It replaces weapons with ZP_ variants and the replacement yielded nothing. Loads with no error — the failure is only visible in game.",
+      "mutatorClass": "ZeroPingPlus103.ZeroPing",
+      "unverified": true
     },
     {
       "name": "StrangeLove",
       "package": "SLV205",
       "kind": "mutator",
       "control": "passive",
-      "notes": "Redeemers become flyable guided missiles."
+      "notes": "Redeemers become flyable guided missiles.",
+      "mutatorClass": "SLV205.StrangeMutator"
     },
     {
       "name": "MonsterHunt",
       "package": "MonsterHunt",
       "kind": "gametype",
       "control": "admin",
-      "notes": "Co-op. Select with change_gametype gametype=MonsterHunt.MonsterHunt on an MH-* map."
+      "notes": "Co-op. Select with change_gametype gametype=MonsterHunt.MonsterHunt on an MH-* map.",
+      "mutatorClass": "MonsterHunt.MonsterHunt"
     },
     {
       "name": "BunnyTrack",
       "package": "BTPlusPlusPublicUTBT_beta3",
       "kind": "gametype",
       "control": "admin",
-      "notes": "Bunny-hop mode; use its CTF-BT-* maps."
+      "notes": "Bunny-hop mode; use its CTF-BT-* maps. Gametype, not a mutator; select it via its own game class on a CTF-BT-* map.",
+      "mutatorClass": null
     },
     {
       "name": "ChaosUT",
       "package": "ChaosUT",
       "kind": "gametype",
       "control": "admin",
-      "notes": "Chaos game types and maps (CUT/CUTA)."
+      "notes": "Chaos game types and maps (CUT/CUTA).",
+      "mutatorClass": "ChaosUT.ChaosUTMutators"
+    },
+    {
+      "name": "Relic: RelicRegen",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicRegen",
+      "notes": "Bonus-pack relic — +10 health per second. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "Relic: RelicDefense",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicDefense",
+      "notes": "Bonus-pack relic — prevents 60% of damage taken. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "Relic: RelicSpeed",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicSpeed",
+      "notes": "Bonus-pack relic — superhuman speed and reflexes. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "Relic: RelicStrength",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicStrength",
+      "notes": "Bonus-pack relic — large increase in damage dealt. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "Relic: RelicRedemption",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicRedemption",
+      "notes": "Bonus-pack relic — saves the holder from death. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "Relic: RelicDeath",
+      "package": "Relics",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "Relics.RelicDeath",
+      "notes": "Bonus-pack relic — Vengeance: punishes whoever kills the holder. Each relic is its OWN mutator; there is no single relics switch, so all six must be listed to get the full set."
+    },
+    {
+      "name": "InstaGib",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.InstaGibDM",
+      "notes": "Super shock rifle only, one-hit kills. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Sniper Arena",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.SniperArena",
+      "notes": "Sniper rifles only. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Rocket Arena",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.RocketArena",
+      "notes": "Rocket launchers only. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Shock Arena",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.ShockArena",
+      "notes": "Shock rifles only. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Pulse Arena",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.PulseArena",
+      "notes": "Pulse guns only. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Flak Arena",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.FlakArena",
+      "notes": "Flak cannons only. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Low Gravity",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.LowGrav",
+      "notes": "Low gravity. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "JumpMatch",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.JumpMatch",
+      "notes": "Players jump extremely high. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Stealth",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.Stealth",
+      "notes": "Everyone is invisible. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "FatBoy",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.FatBoy",
+      "notes": "Players swell as they score. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Chainsaw Melee",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.ChainsawMelee",
+      "notes": "Everyone's melee weapon is a chainsaw. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Instant Rockets",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.InstantRockets",
+      "notes": "Rocket launcher cannot load multiple rockets. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "No Powerups",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.NoPowerups",
+      "notes": "Removes shieldbelt, udamage, superhealth and invisibility. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "No Redeemer",
+      "package": "Botpack",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "BotPack.NoRedeemer",
+      "notes": "Removes the redeemer. Stock UT99 (Botpack) — always replicated to clients, needs no ServerPackages entry."
+    },
+    {
+      "name": "Team Beacon",
+      "package": "De",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "De.TeamBeacon",
+      "notes": "Identifies team members through walls. Package is replicated via MVE's MainServerPackages, not the ini list."
+    },
+    {
+      "name": "Volatile Ammo",
+      "package": "De",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "DE.VolatileAmmo",
+      "notes": "Ammo pickups explode when shot. Package is replicated via MVE's MainServerPackages, not the ini list."
+    },
+    {
+      "name": "Volatile Weapon",
+      "package": "De",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "De.VolatileWeapon",
+      "notes": "Killed players discharge their weapon. Package is replicated via MVE's MainServerPackages, not the ini list."
+    },
+    {
+      "name": "Chaos Sword Melee",
+      "package": "ChaosUTMiscMuts",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ChaosUTMiscMuts.SwordMelee",
+      "notes": "Melee weapon becomes a ChaosUT bastard sword."
+    },
+    {
+      "name": "Chaos Grapple Only",
+      "package": "ChaosUTMiscMuts",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ChaosUTMiscMuts.grappleonly",
+      "notes": "Everyone carries the CUT grapple."
+    },
+    {
+      "name": "Chaos No Health",
+      "package": "ChaosUTMiscMuts",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ChaosUTMiscMuts.NoHealth",
+      "notes": "Removes all health pickups."
+    },
+    {
+      "name": "Chaos Arena",
+      "package": "ChaosUTMiscMuts",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ChaosUTMiscMuts.ChaosUTMutatorArena",
+      "notes": "All weapons replaced by the ChaosUT arena selection."
+    },
+    {
+      "name": "Chainsaw Arena",
+      "package": "MonsterHunt",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "MonsterHunt.ChainsawArena",
+      "notes": "Replaces all weapons with the chainsaw."
+    },
+    {
+      "name": "Monster Mess",
+      "package": "MonsterHunt",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "MonsterHunt.MonsterMess",
+      "notes": "Monsters gib messily."
+    },
+    {
+      "name": "StrangeLove Arena",
+      "package": "SLV205",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "SLV205.StrangeArena",
+      "notes": "ALL weapons replaced by Strangeloves, not just redeemers — a far bigger change than the plain StrangeLove mutator."
+    },
+    {
+      "name": "ZeroPing AccuGib",
+      "package": "ZeroPingPlus103",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ZeroPingPlus103.AccuGib",
+      "notes": "InstaGib with ZeroPing hit detection. Same ZeroPingPlus103 package as the plain ZeroPing mutator, which was VERIFIED to leave the map with no pickup weapons on this image (2026-08-13). Test on an empty server before using; it loads with no error, so the log will not warn you.",
+      "unverified": true
+    },
+    {
+      "name": "ZeroPing ColorAccuGib",
+      "package": "ZeroPingPlus103",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ZeroPingPlus103.ColorAccuGib",
+      "notes": "AccuGib with coloured shots. Same ZeroPingPlus103 package as the plain ZeroPing mutator, which was VERIFIED to leave the map with no pickup weapons on this image (2026-08-13). Test on an empty server before using; it loads with no error, so the log will not warn you.",
+      "unverified": true
+    },
+    {
+      "name": "ZeroPing Shock Arena",
+      "package": "ZeroPingPlus103",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ZeroPingPlus103.ZP_ShockArena",
+      "notes": "Shock arena with ZeroPing. Same ZeroPingPlus103 package as the plain ZeroPing mutator, which was VERIFIED to leave the map with no pickup weapons on this image (2026-08-13). Test on an empty server before using; it loads with no error, so the log will not warn you.",
+      "unverified": true
+    },
+    {
+      "name": "ZeroPing Sniper Arena",
+      "package": "ZeroPingPlus103",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "ZeroPingPlus103.ZP_SniperArena",
+      "notes": "Sniper arena with ZeroPing. Same ZeroPingPlus103 package as the plain ZeroPing mutator, which was VERIFIED to leave the map with no pickup weapons on this image (2026-08-13). Test on an empty server before using; it loads with no error, so the log will not warn you.",
+      "unverified": true
+    },
+    {
+      "name": "XPickups",
+      "package": "XPickups",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "XPickups.XPickupsMut",
+      "notes": "Alternative pickup behaviour. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "X Rocket Arena",
+      "package": "XPickups",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "XPickups.XRocketArena",
+      "notes": "Rocket arena using XPickups. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "X Shock Arena",
+      "package": "XPickups",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "XPickups.XShockArena",
+      "notes": "Shock arena using XPickups. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "X Sniper Arena",
+      "package": "XPickups",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "XPickups.XSniperArena",
+      "notes": "Sniper arena using XPickups. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "IG+ UTPure",
+      "package": "InstaGibPlus_10B",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "InstaGibPlus_10B.UTPure",
+      "notes": "Base IG+ mutator, required by the rest of the suite. InstaGibPlus is a SUITE: InstaGibPlus_10B.UTPure is the base mutator the others require, so load it alongside any of them. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "IG+ NewNetIG",
+      "package": "InstaGibPlus_10B",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "InstaGibPlus_10B.NewNetIG",
+      "notes": "InstaGib with a lag-compensated super shock rifle. InstaGibPlus is a SUITE: InstaGibPlus_10B.UTPure is the base mutator the others require, so load it alongside any of them. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "IG+ NewNetSA",
+      "package": "InstaGibPlus_10B",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "InstaGibPlus_10B.NewNetSA",
+      "notes": "Sniper arena with a lag-compensated sniper rifle. InstaGibPlus is a SUITE: InstaGibPlus_10B.UTPure is the base mutator the others require, so load it alongside any of them. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "IG+ Kill Feed",
+      "package": "InstaGibPlus_10B",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "InstaGibPlus_10B.MutKillFeed",
+      "notes": "On-screen kill feed. InstaGibPlus is a SUITE: InstaGibPlus_10B.UTPure is the base mutator the others require, so load it alongside any of them. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "IG+ Fragger Arena",
+      "package": "InstaGibPlus_10B",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "InstaGibPlus_10B.MutFraggerArena",
+      "notes": "Sniper plus translocator combat. InstaGibPlus is a SUITE: InstaGibPlus_10B.UTPure is the base mutator the others require, so load it alongside any of them. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
+    },
+    {
+      "name": "No Self Damage",
+      "package": "NoSelfDamage",
+      "kind": "mutator",
+      "control": "passive",
+      "mutatorClass": "NoSelfDamage.NoSelfDamage",
+      "notes": "Nullifies self damage and controls team/self boost. Usable only because respawn-init.sh registers this package in ServerPackages (GAME_ENV_UT_EXTRA_SERVERPACKAGES) — the stock image ships the files but lists the package nowhere, so clients never download it. Not yet tested in play.",
+      "unverified": true
     }
   ],
   "maps": [
-    "CTF-Face",
-    "CTF-Coret",
+    "AS-Frigate",
+    "AS-Guardia",
+    "AS-HiSpeed",
+    "AS-Mazon",
+    "AS-OceanFloor",
+    "AS-Overlord",
+    "AS-Rook",
+    "CTF-BT-FEB-Factory",
+    "CTF-BT-FEB-Haunting",
+    "CTF-BT-FEB-KaPLaNsJungle",
+    "CTF-BT-FEB-Maverick",
+    "CTF-BT-FEB-MiningFacility",
+    "CTF-BT-FEB-MiningFacilitySE",
+    "CTF-BT-FEB-MountainBase",
+    "CTF-BT-FEB-SpaceBunnies",
+    "CTF-BT-FEB-iLLNeSs",
+    "CTF-BT-MSE-Hammerize",
+    "CTF-Beatitude",
+    "CTF-CUT_ChaosCastle-pf",
+    "CTF-CUT_Horus",
     "CTF-Command",
-    "CTF-Gauntlet",
-    "CTF-LavaGiant",
-    "CTF-November",
+    "CTF-Coret",
+    "CTF-Cybrosis][",
+    "CTF-Darji16",
     "CTF-Dreary",
-    "DM-Deck16][",
-    "DM-Peak",
-    "DM-Turbine",
+    "CTF-EpicBoy",
+    "CTF-EternalCave",
+    "CTF-Face",
+    "CTF-Face-SE",
+    "CTF-Face][",
+    "CTF-Gauntlet",
+    "CTF-HallOfGiants",
+    "CTF-High",
+    "CTF-Hydro16",
+    "CTF-Kosov",
+    "CTF-LavaGiant",
+    "CTF-Niven",
+    "CTF-November",
+    "CTF-Noxion16",
+    "CTF-Nucleus",
+    "CTF-Orbital",
+    "CTF-Ratchet",
+    "CTF-W00tabulous",
+    "CTF-[ASL]Fastaction",
+    "CTF-andACTION",
+    "DM-Agony",
+    "DM-ArcaneTemple",
+    "DM-Barricade",
+    "DM-Bishop",
+    "DM-CUTA_Bridge",
+    "DM-CUTA_Cerebro",
+    "DM-CUTA_ChaosArena",
+    "DM-CUTA_Pillar",
+    "DM-CUT_DM4",
+    "DM-CUT_Eclipse",
+    "DM-CUT_JailHouse",
+    "DM-CUT_Proxyking",
+    "DM-CUT_SkullMoon",
+    "DM-CUT_StorageAlpha",
+    "DM-CUT_TheBellTolls",
+    "DM-CUT_WeaponsOfChaos",
+    "DM-CUT_WeaponsOfWar",
+    "DM-Closer",
     "DM-Codex",
-    "DM-Morpheus",
-    "DM-Grinder",
-    "DM-Liandri",
     "DM-Conveyor",
+    "DM-Crane",
+    "DM-Curse][",
+    "DM-Cybrosis][",
+    "DM-Deck16][",
+    "DM-FNB-HyperFrag",
+    "DM-Fetid",
+    "DM-Fractal",
+    "DM-Gothic",
+    "DM-Grinder",
+    "DM-Grit-TOURNEY",
+    "DM-HealPod][",
+    "DM-HyperBlast",
+    "DM-KGalleon",
+    "DM-Liandri",
+    "DM-Malevolence",
+    "DM-Maris",
+    "DM-Mita]I[",
+    "DM-Mojo][",
+    "DM-Morbias][",
+    "DM-Morpheus",
+    "DM-Oblivion",
+    "DM-Peak",
+    "DM-Phobos",
+    "DM-Pressure",
+    "DM-Pyramid",
+    "DM-Shrapnel][",
+    "DM-SpaceNoxx",
+    "DM-Stalwart",
+    "DM-StalwartXL",
+    "DM-Tempest",
+    "DM-Turbine",
+    "DM-Viridian-TOURNEY",
+    "DM-Zeto",
+    "DOM-Bullet",
+    "DOM-Cidom",
+    "DOM-Cinder",
+    "DOM-Condemned",
+    "DOM-Cryptic",
+    "DOM-Gearbolt",
+    "DOM-Ghardhen",
+    "DOM-Lament",
+    "DOM-Lament][",
+    "DOM-Leadworks",
+    "DOM-MetalDream",
+    "DOM-Olden",
+    "DOM-Sesmar",
+    "DOM-WolfsBay",
+    "KOTH_Cerebro",
+    "KOTH_Dungeon",
+    "KOTH_Wilderness",
+    "MA-Queens",
+    "MA-Revenge",
+    "MA-RocketArena",
+    "MA-Winged",
     "MH-Canyon",
-    "MH-Forbidden"
+    "MH-Forbidden",
+    "MH-Lonely][",
+    "MH-NaliVillage][",
+    "MH-NaliVillage][-SE",
+    "MH-Revenge][",
+    "MH-Revenge][-SE",
+    "MH-Trials",
+    "koth_BaseStationTheta",
+    "koth_alpha_pyramid",
+    "koth_barfly",
+    "koth_cold_winter_dreams",
+    "koth_crater",
+    "koth_fiab",
+    "koth_highrise",
+    "koth_lost_castle",
+    "koth_outpost_arena",
+    "koth_temple",
+    "koth_usschaos"
   ],
   "commands": [
     {
@@ -120,14 +619,28 @@
           "description": "Map name without extension, e.g. MH-Canyon"
         },
         "gametype": {
-          "description": "Game type class: Botpack.CTFGame (CTF), Botpack.DeathMatchPlus (DM), Botpack.TeamGamePlus (Team DM), Botpack.Domination, Botpack.Assault, MonsterHunt.MonsterHunt (co-op mod).",
+          "description": "Game type class. Match the map prefix to the type or the map loads but plays wrong: DM-* for DeathMatchPlus/TeamGamePlus/LastManStanding, CTF-* for CTFGame, DOM-* for Domination, AS-* for Assault, MH-* for MonsterHunt, MA-* for MonsterHuntArena, CTF-BT-* for BunnyTrackGame, koth_*/KOTH-* for ChaosKOTH and ChaosTeamKOTH. The Chaos* types are ChaosUT variants of the stock modes and accept the same prefixes as their stock counterparts. Note the package spells itself `Chaosgames` (lowercase g) in its .int, and BunnyTrack's class is BunnyTrackGame in the long BTPlusPlusPublicUTBT_beta3 package.",
           "values": [
-            "Botpack.CTFGame",
             "Botpack.DeathMatchPlus",
             "Botpack.TeamGamePlus",
+            "Botpack.CTFGame",
             "Botpack.Domination",
             "Botpack.Assault",
-            "MonsterHunt.MonsterHunt"
+            "Botpack.LastManStanding",
+            "MonsterHunt.MonsterHunt",
+            "MonsterHunt.MonsterHuntArena",
+            "MonsterHunt.MonsterHuntDefence",
+            "BTPlusPlusPublicUTBT_beta3.BunnyTrackGame",
+            "Chaosgames.ChaosDeathMatchPlus",
+            "Chaosgames.ChaosTeamGamePlus",
+            "Chaosgames.ChaosCTFGame",
+            "Chaosgames.ChaosDomination",
+            "Chaosgames.ChaosAssault",
+            "Chaosgames.ChaosLastManStanding",
+            "Chaosgames.ChaosKOTH",
+            "Chaosgames.ChaosTeamKOTH",
+            "Chaosgames.ChaosSwordArena",
+            "Chaosgames.ChaosTeamSwordArena"
           ]
         }
       }
@@ -208,7 +721,7 @@
     },
     {
       "name": "rules",
-      "description": "Match settings and active gameplay mutators, from the GameSpy \\rules\\ query. `mutators` is a comma-separated list of the mutators the running game type reports (e.g. InstaGib) \u2014 use it to see which shipped mods are live. The rule set varies by game type.",
+      "description": "Match settings and active gameplay mutators, from the GameSpy \\rules\\ query. `mutators` is a comma-separated list of the mutators the running game type reports (e.g. InstaGib) — use it to see which shipped mods are live. The rule set varies by game type.",
       "rcon": "rules",
       "singles": {
         "mutators": "^mutators=(.*)$",

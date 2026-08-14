@@ -887,5 +887,50 @@ describe('loadConfig', () => {
       expect(config.serviceName).toBe('nb');
       expect(config.container.cpu).toBe(256);
     });
+
+    // The workspace-defaults layer: AWS target declared once for the fleet, so the
+    // per-service copies cannot drift and aim a deploy at a stale account.
+    it('layers workspace defaults under the project base, service .env winning', () => {
+      const defaults = path.join(FIXTURES_DIR, 'wsdefaults');
+      writeEnvFile(defaults, 'AWS_ACCOUNT_ID=111111111111\nAWS_REGION=us-east-1\nCPU=256');
+      const base = path.join(FIXTURES_DIR, 'wsproj');
+      writeEnvFile(base, 'CPU=512\nMEMORY=1024\nPROTOCOL=UDP');
+      const variant = path.join(FIXTURES_DIR, 'wsproj', 'variants', 'modded');
+      writeEnvFile(variant, 'SERVICE_NAME=game\nIMAGE_URI=org/x:latest\nAWS_REGION=us-east-2');
+
+      const config = loadConfig(variant, 'dev', [
+        path.join(defaults, '.env'),
+        path.join(base, '.env'),
+      ]);
+
+      expect(config.aws.accountId).toBe('111111111111'); // defaults-only survives
+      expect(config.aws.region).toBe('us-east-2'); // service overrides defaults
+      expect(config.container.cpu).toBe(512); // project base beats defaults
+      expect(config.container.memory).toBe(1024); // project-base-only survives
+      expect(config.serviceName).toBe('game');
+    });
+
+    it('applies workspace defaults to a flat service with no project base', () => {
+      const defaults = path.join(FIXTURES_DIR, 'wsdefaults2');
+      writeEnvFile(defaults, 'AWS_PROFILE=fleetwide\nAWS_REGION=eu-west-1');
+      const dir = path.join(FIXTURES_DIR, 'wsflat');
+      writeEnvFile(dir, 'SERVICE_NAME=flat2\nCPU=256\nMEMORY=512');
+
+      const config = loadConfig(dir, 'dev', [path.join(defaults, '.env')]);
+
+      expect(config.aws.profile).toBe('fleetwide');
+      expect(config.aws.region).toBe('eu-west-1');
+      expect(config.serviceName).toBe('flat2');
+    });
+
+    it('treats an empty base list as no layering at all', () => {
+      const dir = path.join(FIXTURES_DIR, 'wsnone');
+      writeEnvFile(dir, 'SERVICE_NAME=none\nCPU=256\nMEMORY=512');
+
+      const config = loadConfig(dir, 'dev', []);
+
+      expect(config.serviceName).toBe('none');
+      expect(config.aws.accountId).toBeUndefined();
+    });
   });
 });

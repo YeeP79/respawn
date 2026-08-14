@@ -16,6 +16,12 @@ export interface CliActionContext {
   workspaceRoot: string;
   verbose?: boolean;
   profile?: string;
+  /**
+   * Overrides the region for actions that talk to AWS directly. Unset means the action
+   * falls back to its service's configured AWS_REGION — which is the normal path, since
+   * region is declared per service in .env rather than per invocation.
+   */
+  region?: string;
   force?: boolean;
   forceBuild?: boolean;
   requireImage?: boolean;

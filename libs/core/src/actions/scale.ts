@@ -45,7 +45,13 @@ export async function scale(ctx: ScaleContext): Promise<ActionResult> {
         '--desired-count',
         String(desiredCount),
       ],
-      { profile: ctx.profile, region: ctx.region },
+      // Fall back to the service's configured region, as deploy does. There is no
+      // --region CLI flag, so ctx.region is normally undefined and the AWS CLI would
+      // silently use the profile's default region instead. For a service deployed
+      // outside that default the lookup then finds nothing and reports it as "not
+      // deployed — deploy it first", which reads as a missing stack rather than a
+      // wrong-region query.
+      { profile: ctx.profile, region: ctx.region ?? service.config.aws.region },
     );
 
     if (res.exitCode !== 0) {
