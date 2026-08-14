@@ -1010,8 +1010,9 @@ server.registerTool(
     title: 'Deploy a server',
     description:
       'Build/push the image if needed and deploy the service via CDK. DESTRUCTIVE-ish ' +
-      '(changes live infrastructure) — disabled unless RESPAWN_ALLOW_DEPLOYS=true. Ensure ' +
-      'required secrets exist first (they are preflighted).',
+      '(changes live infrastructure) — disabled unless RESPAWN_ALLOW_DEPLOYS=true, which ' +
+      'covers deploy and push but NOT destroy. Ensure required secrets exist first: they ' +
+      'are preflighted, and check_secrets reports them without deploying.',
     inputSchema: { service: z.string(), environment: environmentSchema },
   },
   async ({ service, environment }) => {
@@ -1050,7 +1051,8 @@ server.registerTool(
     title: 'Destroy a server',
     description:
       'Tear down a service\'s stacks. DESTRUCTIVE and irreversible. Requires ' +
-      'RESPAWN_ALLOW_DEPLOYS=true AND passing confirm=<service name>.',
+      'RESPAWN_ALLOW_DESTROY=true AND passing confirm=<service name>. That flag is its ' +
+      'own, on purpose: allowing deploys or scaling never allows a teardown.',
     inputSchema: {
       service: z.string(),
       environment: environmentSchema,
@@ -1085,7 +1087,8 @@ server.registerTool(
       'Set a service\'s ECS desiredCount — wake a task (1) or sleep it (0) WITHOUT a ' +
       'redeploy. This is the one thing the control tools cannot do on their own: they ' +
       'drive a running task but cannot start one. Changes live infrastructure and billing, ' +
-      'so it is disabled unless RESPAWN_ALLOW_DEPLOYS=true. Returns immediately; reaching ' +
+      'so it is disabled unless RESPAWN_ALLOW_SCALE=true (RESPAWN_ALLOW_DEPLOYS implies ' +
+      'it). Returns immediately; reaching ' +
       'RUNNING takes ~1–2 min — poll server_health for the task and its rcon-control agent.',
     inputSchema: {
       service: z.string(),
