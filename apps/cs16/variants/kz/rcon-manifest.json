@@ -1,0 +1,310 @@
+{
+  "displayName": "Counter-Strike 1.6 (KZ Climbing)",
+  "engine": "goldsrc",
+  "notes": "KZ (Kreedz climbing) build: players race timed obstacle courses, so this server deliberately turns OFF everything CS does to structure a round \u2014 no forced respawn, no freezetime, no buying, no team balance, mp_round_infinite 1. Do NOT copy the DM cvars from cs16-dm here; they fight the mode. Stack is Metamod + AMX Mod X 1.10 + ReGameDLL + ReAPI + AmxxEasyHttp (the last two verified loading 2026-08-28; ReAPI needs ReGameDLL only, NOT ReHLDS). Maps are 39 kreedz.com maps carrying that site's own difficulty tier, and mapcycles/ is generated from maps.txt ordered easiest-first; GAME_ENV_MAPCYCLE picks one (all | starter | climb | bhop | hard | tier-*), an env change rather than a rebuild. NO TIMER PLUGIN IS INSTALLED YET: without one the maps are climbable but nothing measures a run, which is the point of the genre \u2014 the dependencies for Theggv/Kreedz are in place but the plugin is not built. FastDL is required in practice: 224 MB against HLDS's 8 kB/s cap means a joiner without it times out.",
+  "maps": [
+    "kz_bhopwarehouse",
+    "nfs_longjumpez",
+    "av_degyptianez",
+    "kt_aztecclimb",
+    "bkz_goldbhop",
+    "kz_hopez",
+    "cg_coldbhop",
+    "kz_nolve",
+    "j2s_4floors",
+    "bkz_junglebhop",
+    "kz_xj_ezbrickjump",
+    "clintmo_bhopbarrels",
+    "clintmo_bhopwarehouse",
+    "kz_cg_lavacliff",
+    "kz_greattemple",
+    "kz_starwars_deeja",
+    "kz_exodus_ez",
+    "cg_wildwesthop",
+    "kzm_cityhops",
+    "kz_chinabl0ck_ez",
+    "kz_j2s_nightcanyon",
+    "kzse_ancienthopez",
+    "kz_rd_giganticwall",
+    "kz_cg_venice",
+    "kz_absolute",
+    "cg_cbblebhop",
+    "cg_arizonabhop",
+    "kz_megabhop_hard",
+    "kz_kzdk_droughthop",
+    "clintmo_bhoptoon",
+    "kz_man_urbanjump",
+    "kz_kzarg_catacombsbhop",
+    "kz_j2s_summercliff_h",
+    "kz_xj_rockblock",
+    "bkm_problock",
+    "risk_forgeblock",
+    "kz_man_redrock",
+    "kz_northpole_b01",
+    "qsk_azure"
+  ],
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Switch to a different map immediately.",
+      "rcon": "changelevel {map}",
+      "args": {
+        "map": {
+          "description": "Map name, e.g. de_nuke (no .bsp)",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "restart_round",
+      "description": "Restart the current round after a delay in seconds.",
+      "rcon": "sv_restartround {seconds}",
+      "args": {
+        "seconds": {
+          "description": "Delay before restart",
+          "type": "int"
+        }
+      }
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name or userid (see server_status for ids).",
+      "rcon": "kick {player}",
+      "args": {
+        "player": {
+          "description": "Player name in quotes, or #userid"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "ban_player",
+      "description": "Ban a player by userid for N minutes (0 = permanent).",
+      "rcon": "banid {minutes} {userid} kick",
+      "args": {
+        "minutes": {
+          "description": "Ban length in minutes; 0 is permanent",
+          "type": "int"
+        },
+        "userid": {
+          "description": "Numeric userid from the players query"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone on the server.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast"
+        }
+      }
+    },
+    {
+      "name": "set_join_password",
+      "description": "Set or clear the password players need to join (empty clears it). Distinct from the rcon admin password.",
+      "rcon": "sv_password {password}",
+      "args": {
+        "password": {
+          "description": "Join password; empty string removes it"
+        }
+      }
+    },
+    {
+      "name": "amx_map",
+      "description": "Change level immediately via AMXX (bypasses any vote).",
+      "rcon": "amx_map {map}",
+      "args": {
+        "map": {
+          "description": "Map name without .bsp.",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "force_vote",
+      "description": "Open a next-map vote between the maps you name (1-4). Does NOT read mapcycle.txt \u2014 amx_votemap takes its choices as arguments and prints usage if given none.",
+      "rcon": "amx_votemap {maps}",
+      "args": {
+        "maps": {
+          "description": "One to four map names, space-separated, e.g. \"de_dust2 de_aztec\".",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "cancel_vote",
+      "description": "Cancel a vote currently running.",
+      "rcon": "amx_cancelvote",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "show_nextmap",
+      "description": "Report the map queued next in the cycle.",
+      "rcon": "amx_nextmap",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "time_left",
+      "description": "Report time remaining on the current map.",
+      "rcon": "amx_timeleft",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "extend_map",
+      "description": "Add minutes to the current map's time limit.",
+      "rcon": "amx_extendmap {minutes}",
+      "args": {
+        "minutes": {
+          "description": "Minutes to add.",
+          "type": "int"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "amx_say",
+      "description": "Broadcast a message through AMXX.",
+      "rcon": "amx_say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast.",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "list_plugins",
+      "description": "List loaded AMXX plugins and whether each is running.",
+      "rcon": "amx_plugins",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "list_modules",
+      "description": "List loaded AMXX modules.",
+      "rcon": "amx_modules",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "meta_list",
+      "description": "List Metamod plugins \u2014 confirms AMXX was chain-loaded.",
+      "rcon": "meta list",
+      "args": {},
+      "unverified": true
+    }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Who is connected: userid, name and steamid for each player, plus the current map. Use the userid with kick_player / ban_player.",
+      "rcon": "status",
+      "singles": {
+        "hostname": "^hostname\\s*:\\s*(.+)$",
+        "map": "^map\\s*:\\s*(\\S+)",
+        "playerCount": "^players\\s*:\\s*(.+)$"
+      },
+      "row": {
+        "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|VALVE_\\S+)?",
+        "fields": [
+          "userid",
+          "name",
+          "steamid"
+        ],
+        "skipIf": "^#\\s*userid"
+      }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "mp_friendlyfire",
+      "description": "Whether players can damage teammates.",
+      "default": "0",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "mp_timelimit",
+      "description": "Minutes per map before it changes.",
+      "default": "0",
+      "range": [
+        0,
+        120
+      ]
+    },
+    {
+      "name": "mp_roundtime",
+      "description": "Round length in minutes.",
+      "default": "5",
+      "range": [
+        1,
+        9
+      ]
+    },
+    {
+      "name": "mp_startmoney",
+      "description": "Money each player starts a match with.",
+      "default": "800",
+      "range": [
+        800,
+        16000
+      ]
+    },
+    {
+      "name": "mp_autoteambalance",
+      "description": "Auto-balance team sizes between rounds.",
+      "default": "1",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "bhop_auto",
+      "description": "Auto re-jump while the jump key is held. Pair with bhop_speed \u2014 auto alone gives hops that never build velocity. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "sv_autobunnyhopping {value}",
+      "read": "sv_autobunnyhopping"
+    },
+    {
+      "name": "bhop_speed",
+      "description": "Allow player speed to exceed the normal running cap \u2014 this is the actual bunnyhop. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "sv_enablebunnyhopping {value}",
+      "read": "sv_enablebunnyhopping"
+    },
+    {
+      "name": "jump_height",
+      "description": "Player jump height (ReGameDLL default 45). Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_jump_height {value}",
+      "read": "mp_jump_height"
+    },
+    {
+      "name": "airaccelerate",
+      "description": "Mid-air steering \u2014 THE KZ cvar; every jump technique depends on it. 100 is the standard the maps and their published records assume. Stock CS is 10, on which most KZ maps are impossible.",
+      "rcon": "sv_airaccelerate {value}",
+      "read": "sv_airaccelerate"
+    },
+    {
+      "name": "gravity",
+      "description": "Stock CS is 800. Changing it invalidates comparison against any published time.",
+      "rcon": "sv_gravity {value}",
+      "read": "sv_gravity"
+    },
+    {
+      "name": "maxspeed",
+      "description": "Stock CS is 320. As with gravity, changing it makes times incomparable.",
+      "rcon": "sv_maxspeed {value}",
+      "read": "sv_maxspeed"
+    }
+  ]
+}
