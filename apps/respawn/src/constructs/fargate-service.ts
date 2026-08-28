@@ -209,6 +209,8 @@ export class GameServerFargateService extends Construct {
         logGroup: logging.logGroup,
         database: config.mysql.database,
         rootPassword: rootSecret,
+        ...(config.mysql.backupS3Uri ? { backupS3Uri: config.mysql.backupS3Uri } : {}),
+        backupIntervalSeconds: config.mysql.backupIntervalSeconds,
       });
     }
 

@@ -90,6 +90,12 @@ export interface MysqlConfig {
    * rather than defaulted.
    */
   rootPasswordVar: string;
+  /**
+   * `s3://bucket/key` for a dump that survives the scale-to-zero cycle. Unset means the
+   * database is session-scoped: a Fargate task has no volume, so records die with it.
+   */
+  backupS3Uri?: string;
+  backupIntervalSeconds: number;
 }
 
 export interface PersistentStorageConfig {

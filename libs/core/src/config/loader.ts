@@ -666,6 +666,12 @@ export function loadConfig(
       database: env['MYSQL_DATABASE'] ?? DEFAULT_MYSQL.database,
       rootPasswordVar:
         env['MYSQL_ROOT_PASSWORD_VAR'] ?? DEFAULT_MYSQL.rootPasswordVar,
+      ...(env['MYSQL_BACKUP_S3_URI']
+        ? { backupS3Uri: env['MYSQL_BACKUP_S3_URI'] }
+        : {}),
+      backupIntervalSeconds:
+        parseNumber(env['MYSQL_BACKUP_INTERVAL_SECONDS']) ??
+        DEFAULT_MYSQL.backupIntervalSeconds,
     },
 
     rconControl: {

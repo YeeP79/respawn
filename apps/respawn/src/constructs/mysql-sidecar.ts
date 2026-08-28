@@ -1,5 +1,7 @@
+import * as path from 'node:path';
 import { Duration } from 'aws-cdk-lib';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
@@ -10,6 +12,13 @@ export interface MysqlSidecarProps {
   database: string;
   /** Root password, injected as an ECS secret — never a plaintext env var. */
   rootPassword: ecs.Secret;
+  /**
+   * `s3://bucket/key` for the dump that survives the scale-to-zero cycle. Unset means
+   * no persistence: the timer works within a session and forgets between them.
+   */
+  backupS3Uri?: string;
+  /** How often to dump while running. */
+  backupIntervalSeconds?: number;
 }
 
 /**
@@ -65,5 +74,54 @@ export class MysqlSidecar extends Construct {
         startPeriod: Duration.seconds(30),
       },
     });
+
+    if (!props.backupS3Uri) return;
+
+    // Persistence for a database that has no volume. See sidecar/mysql-backup/backup.sh
+    // for why this is a dump round-trip rather than EFS (MySQL on NFS is unsupported
+    // and fails by corrupting rather than erroring) or RDS (always-on cost for a server
+    // built to be off).
+    const backupDir = path.join(import.meta.dirname, '../../sidecar/mysql-backup');
+    const backup = props.taskDefinition.addContainer('mysql-backup', {
+      image: ecs.ContainerImage.fromAsset(backupDir),
+      essential: false,
+      cpu: 64,
+      memoryLimitMiB: 128,
+      environment: {
+        BACKUP_S3_URI: props.backupS3Uri,
+        MYSQL_DATABASE: props.database,
+        BACKUP_INTERVAL_SECONDS: String(props.backupIntervalSeconds ?? 300),
+      },
+      secrets: { MYSQL_ROOT_PASSWORD: props.rootPassword },
+      // A dump on the way down has to finish inside the ECS stop timeout, and the
+      // default 30s is shared with the game server's own shutdown.
+      stopTimeout: Duration.seconds(120),
+      logging: ecs.LogDrivers.awsLogs({
+        logGroup: props.logGroup,
+        streamPrefix: 'mysql-backup',
+      }),
+    });
+    // Start after the database is accepting connections, so the restore is not racing
+    // the first-run schema creation.
+    backup.addContainerDependencies({
+      container: this.container,
+      condition: ecs.ContainerDependencyCondition.HEALTHY,
+    });
+
+    const bucket = props.backupS3Uri.replace(/^s3:\/\//, '').split('/')[0];
+    props.taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        // Scoped to this service's own prefix rather than the bucket: the dump contains
+        // player records, and a task should not be able to read another service's.
+        actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+        resources: [`arn:aws:s3:::${props.backupS3Uri.replace(/^s3:\/\//, '')}*`],
+      }),
+    );
+    props.taskDefinition.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:ListBucket'],
+        resources: [`arn:aws:s3:::${bucket}`],
+      }),
+    );
   }
 }

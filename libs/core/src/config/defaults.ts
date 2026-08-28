@@ -80,6 +80,7 @@ export const DEFAULT_MYSQL = {
   enabled: false,
   database: 'kreedz',
   rootPasswordVar: 'MYSQL_ROOT_PASSWORD',
+  backupIntervalSeconds: 300,
 } as const;
 
 export const DEFAULT_RCON_CONTROL: RconControlConfig = {
