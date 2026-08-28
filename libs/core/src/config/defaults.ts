@@ -75,6 +75,13 @@ export const DEFAULT_REDIS: RedisConfig = {
   enabled: false,
 };
 
+/** MySQL sidecar: off unless a mod needs a database to function. */
+export const DEFAULT_MYSQL = {
+  enabled: false,
+  database: 'kreedz',
+  rootPasswordVar: 'MYSQL_ROOT_PASSWORD',
+} as const;
+
 export const DEFAULT_RCON_CONTROL: RconControlConfig = {
   enabled: false,
   protocol: 'goldsrc',

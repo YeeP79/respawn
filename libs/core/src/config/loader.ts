@@ -21,6 +21,7 @@ import {
   DEFAULT_HEALTH_CHECK,
   DEFAULT_IDLE_SHUTDOWN,
   DEFAULT_REDIS,
+  DEFAULT_MYSQL,
   DEFAULT_RCON_CONTROL,
   DEFAULT_PERSISTENT_STORAGE,
   DEFAULT_AWS,
@@ -657,6 +658,14 @@ export function loadConfig(
       enabled:
         parseBoolean(env['ENABLE_REDIS_SIDECAR']) ??
         DEFAULT_REDIS.enabled,
+    },
+
+    mysql: {
+      enabled:
+        parseBoolean(env['ENABLE_MYSQL_SIDECAR']) ?? DEFAULT_MYSQL.enabled,
+      database: env['MYSQL_DATABASE'] ?? DEFAULT_MYSQL.database,
+      rootPasswordVar:
+        env['MYSQL_ROOT_PASSWORD_VAR'] ?? DEFAULT_MYSQL.rootPasswordVar,
     },
 
     rconControl: {

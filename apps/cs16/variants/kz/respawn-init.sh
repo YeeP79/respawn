@@ -23,6 +23,16 @@ AMXX_ADMIN_NAME="${AMXX_ADMIN_NAME:-admin}"
 AMXX_ADMIN_PASSWORD="${AMXX_ADMIN_PASSWORD:-}"
 FASTDL_URL="${FASTDL_URL:-}"
 
+# --- KZ timer database -------------------------------------------------------
+# The timer plugins read their connection from kreedz.cfg, which ships with the
+# author's placeholder credentials. Rewrite it from the injected secret rather than
+# baking a password into the image. The sidecar shares the task network namespace, so
+# the database is on loopback and never leaves the task.
+MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
+MYSQL_DATABASE="${MYSQL_DATABASE:-kreedz}"
+MYSQL_USER="${MYSQL_USER:-root}"
+MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
+
 # Which generated cycle to run: all | starter | climb | bhop | hard | tier-<name>.
 # Cycles are ordered easiest-first; `starter` is Beginner+Easy for a group new to KZ.
 MAPCYCLE="${MAPCYCLE:-all}"
@@ -78,6 +88,27 @@ else
   amxx_state="no admin (AMXX_ADMIN_PASSWORD unset)"
 fi
 
+# Point the KZ plugins at the sidecar. Without a password the timer still LOADS —
+# kz_sql_core registers its natives and then reports itself failed — so the server runs
+# with a working in-session timer whose records do not save. That is a legitimate
+# configuration, so this warns rather than aborts.
+KREEDZ_CFG="${DIR}/addons/amxmodx/configs/kreedz.cfg"
+if [ -f "${KREEDZ_CFG}" ]; then
+  if [ -n "${MYSQL_ROOT_PASSWORD}" ]; then
+    sed -i \
+      -e "s|^kz_sql_hostname .*|kz_sql_hostname = \"${MYSQL_HOST}\"|" \
+      -e "s|^kz_sql_username .*|kz_sql_username = \"${MYSQL_USER}\"|" \
+      -e "s|^kz_sql_password .*|kz_sql_password = \"${MYSQL_ROOT_PASSWORD}\"|" \
+      -e "s|^kz_sql_database .*|kz_sql_database = \"${MYSQL_DATABASE}\"|" \
+      "${KREEDZ_CFG}"
+    sql_state="${MYSQL_USER}@${MYSQL_HOST}/${MYSQL_DATABASE}"
+  else
+    sql_state="NOT configured - timer runs but records will not persist"
+  fi
+else
+  sql_state="kreedz.cfg absent (timer not installed?)"
+fi
+
 # Fail loudly rather than boot with a cycle the vote cannot read.
 CYCLE_FILE="${DIR}/mapcycles/${MAPCYCLE}.txt"
 if [ ! -f "${CYCLE_FILE}" ]; then
@@ -91,6 +122,7 @@ if [ -n "${FASTDL_URL}" ]; then fastdl_state="${FASTDL_URL}"; else fastdl_state=
 echo "Respawn: wrote ${CFG} (hostname=${SERVERNAME}, rcon ${rcon_state})"
 echo "Respawn: kz airaccelerate=${AIRACCELERATE} gravity=${GRAVITY}; amxx ${amxx_state}"
 echo "Respawn: mapcycle ${MAPCYCLE} ($(grep -vc '^//' "${CYCLE_FILE}") maps); fastdl ${fastdl_state}"
+echo "Respawn: kz sql ${sql_state}"
 
 cd /opt/steam/hlds
 exec /bin/sh ./entrypoint.sh "$@"

@@ -16,6 +16,7 @@ import { GameServerNetworking } from './networking.js';
 import { GameServerEfsStorage } from './efs-storage.js';
 import { IdleShutdownSidecar } from './idle-shutdown.js';
 import { RconControlSidecar } from './rcon-control.js';
+import { MysqlSidecar } from './mysql-sidecar.js';
 import { RedisSidecar } from './redis-sidecar.js';
 
 export interface GameServerFargateServiceProps {
@@ -187,6 +188,28 @@ export class GameServerFargateService extends Construct {
 
       // Grant the task role access to the EFS file system
       efsStorage.fileSystem.grantReadWrite(taskDefinition.taskRole);
+    }
+
+    // MySQL sidecar (optional) — for mods that need a database to FUNCTION, not just
+    // to persist. The CS 1.6 KZ timer is the case: kz_core calls natives from
+    // kz_sql_core, so dropping the SQL plugins fails the timer itself.
+    if (config.mysql.enabled) {
+      const rootSecret = containerSecrets[config.mysql.rootPasswordVar];
+      if (!rootSecret) {
+        throw new Error(
+          `${config.serviceName}: ENABLE_MYSQL_SIDECAR is set but SECRET_REFS has no ` +
+            `entry named "${config.mysql.rootPasswordVar}". A database sidecar with no ` +
+            `password is reachable by every container in the task, so the password is ` +
+            `required. Add it to SECRET_REFS, or set MYSQL_ROOT_PASSWORD_VAR to the ` +
+            `entry that holds it.`,
+        );
+      }
+      new MysqlSidecar(this, 'Mysql', {
+        taskDefinition,
+        logGroup: logging.logGroup,
+        database: config.mysql.database,
+        rootPassword: rootSecret,
+      });
     }
 
     // Redis sidecar (optional)

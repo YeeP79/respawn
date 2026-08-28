@@ -12,6 +12,7 @@ export interface GameServerConfig {
   healthCheck: HealthCheckConfig;
   idleShutdown: IdleShutdownConfig;
   redis: RedisConfig;
+  mysql: MysqlConfig;
   rconControl: RconControlConfig;
   persistentStorage: PersistentStorageConfig;
   secretRefs: SecretRef[];
@@ -77,6 +78,18 @@ export interface AdditionalPort {
   containerPort: number;
   hostPort: number;
   protocol: 'TCP' | 'UDP';
+}
+
+export interface MysqlConfig {
+  enabled: boolean;
+  /** Database created on first start. */
+  database: string;
+  /**
+   * SECRET_REFS container env var holding the root password. A database sidecar with
+   * no password is reachable by every container in the task, so this is required
+   * rather than defaulted.
+   */
+  rootPasswordVar: string;
 }
 
 export interface PersistentStorageConfig {
