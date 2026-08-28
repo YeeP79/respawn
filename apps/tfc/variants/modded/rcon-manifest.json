@@ -1,0 +1,254 @@
+{
+  "displayName": "Team Fortress Classic (Modded)",
+  "engine": "goldsrc",
+  "notes": "GoldSrc/HLDS, same command family as cs16 (verified live). rcon over UDP via the sidecar; maps queried live. MODDED VARIANT: this build runs Metamod + AMX Mod X, so the amx_* commands below exist IN ADDITION to the stock GoldSrc rcon verbs. They are issued over the same goldsrc rcon transport and AMXX replies on the console, so unlike the stock verbs most of them do return output. MAP VOTING is mapchooser.amxx: it opens a vote near map end drawn from mapcycle.txt, and amx_votemap forces one immediately. IMPORTANT: amx_map changes level directly and bypasses the vote entirely. The 20 custom skill maps are conc (scout/medic concussion) and rocket-jump (soldier) tracks; 2fort is the stock boot map. Clients need FASTDL_URL set or they will not finish downloading the custom content \u2014 HLDS throttles its own transfer to 8 kB/s.",
+  "maps": [
+    "2fort",
+    "concmap_tg",
+    "rjstarters",
+    "concmap_r",
+    "rjumptfc",
+    "skeeconc",
+    "quad_rocket",
+    "concmap2",
+    "pyrojump",
+    "training",
+    "newb_conc",
+    "mjump1",
+    "axlconc8b",
+    "rjump2",
+    "tayconc",
+    "jumperz",
+    "esad_newbconc",
+    "phsyco_ward_r",
+    "k_concmap",
+    "58thv2",
+    "concmap_cze",
+    "l",
+    "i",
+    "v",
+    "e"
+  ],
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Switch to a different map immediately (e.g. ctf_2fort, ctf_well).",
+      "rcon": "changelevel {map}",
+      "args": {
+        "map": {
+          "description": "Map name without .bsp",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "restart_round",
+      "description": "Restart the map after a delay in seconds.",
+      "rcon": "sv_restart {seconds}",
+      "args": {
+        "seconds": {
+          "description": "Delay before restart",
+          "type": "int"
+        }
+      }
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name or #userid (see the players query).",
+      "rcon": "kick {player}",
+      "args": {
+        "player": {
+          "description": "Player name in quotes, or #userid"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "ban_player",
+      "description": "Ban a player by userid for N minutes (0 = permanent).",
+      "rcon": "banid {minutes} {userid} kick",
+      "args": {
+        "minutes": {
+          "description": "Ban length in minutes; 0 is permanent",
+          "type": "int"
+        },
+        "userid": {
+          "description": "Numeric userid from the players query"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone on the server.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast"
+        }
+      }
+    },
+    {
+      "name": "set_join_password",
+      "description": "Set or clear the join password (empty clears it). Distinct from rcon.",
+      "rcon": "sv_password {password}",
+      "args": {
+        "password": {
+          "description": "Join password; empty removes it"
+        }
+      }
+    },
+    {
+      "name": "amx_map",
+      "description": "Change level immediately via AMXX. Bypasses the vote \u2014 use force_vote to let players decide instead.",
+      "rcon": "amx_map {map}",
+      "args": {
+        "map": {
+          "description": "Map name without .bsp; see maps.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "force_vote",
+      "description": "Open a next-map vote immediately, between the maps you name (1-4). Unlike mapchooser's automatic end-of-map vote, this does NOT read mapcycle.txt \u2014 amx_votemap takes its choices as arguments and prints usage if given none.",
+      "rcon": "amx_votemap {maps}",
+      "args": {
+        "maps": {
+          "description": "One to four map names, space-separated, e.g. \"concmap_r concmap_tg\".",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "cancel_vote",
+      "description": "Cancel a vote that is currently running.",
+      "rcon": "amx_cancelvote",
+      "args": {}
+    },
+    {
+      "name": "show_nextmap",
+      "description": "Report the map queued next in the cycle.",
+      "rcon": "amx_nextmap",
+      "args": {}
+    },
+    {
+      "name": "time_left",
+      "description": "Report time remaining on the current map.",
+      "rcon": "amx_timeleft",
+      "args": {}
+    },
+    {
+      "name": "extend_map",
+      "description": "Add minutes to the current map's time limit.",
+      "rcon": "amx_extendmap {minutes}",
+      "args": {
+        "minutes": {
+          "description": "Minutes to add.",
+          "type": "int"
+        }
+      }
+    },
+    {
+      "name": "amx_say",
+      "description": "Broadcast a message through AMXX (shown to all players).",
+      "rcon": "amx_say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "amx_kick_player",
+      "description": "Kick a player via AMXX. Matches on a partial name, unlike the stock kick.",
+      "rcon": "amx_kick \"{player}\"",
+      "args": {
+        "player": {
+          "description": "Player name or fragment.",
+          "type": "string"
+        }
+      },
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "list_plugins",
+      "description": "List loaded AMXX plugins and whether each is running \u2014 the check for 'is mapchooser actually live'.",
+      "rcon": "amx_plugins",
+      "args": {}
+    },
+    {
+      "name": "list_modules",
+      "description": "List loaded AMXX modules (confirms the TFC module loaded).",
+      "rcon": "amx_modules",
+      "args": {}
+    },
+    {
+      "name": "meta_list",
+      "description": "List Metamod plugins \u2014 confirms AMXX itself was chain-loaded by Metamod.",
+      "rcon": "meta list",
+      "args": {}
+    }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name and steamid, plus the current map. Use the userid with kick_player / ban_player.",
+      "rcon": "status",
+      "singles": {
+        "hostname": "^hostname\\s*:\\s*(.+)$",
+        "map": "^map\\s*:\\s*(\\S+)",
+        "playerCount": "^players\\s*:\\s*(.+)$"
+      },
+      "row": {
+        "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|VALVE_\\S+)?",
+        "fields": [
+          "userid",
+          "name",
+          "steamid"
+        ],
+        "skipIf": "^#\\s*userid"
+      }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "mp_friendlyfire",
+      "description": "Team damage on/off.",
+      "default": "0",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "mp_timelimit",
+      "description": "Minutes per map before it changes.",
+      "default": "0",
+      "range": [
+        0,
+        120
+      ]
+    },
+    {
+      "name": "mp_fraglimit",
+      "description": "Frags to end the map (0 = none).",
+      "default": "0",
+      "range": [
+        0,
+        1000
+      ]
+    },
+    {
+      "name": "sv_gravity",
+      "description": "World gravity; 800 is default.",
+      "default": "800",
+      "range": [
+        100,
+        2000
+      ]
+    }
+  ]
+}

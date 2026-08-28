@@ -1,0 +1,24 @@
+# One map per line: <name> <url>. Consumed by fetch-content.sh.
+# Source: tfcmaps.net archive (all 20 listed there as Working).
+# The three mixed-case archives (58THV2, K_ConcMap, rjumpTFC) are lowercased on
+# extract: GoldSrc on Linux will not resolve `changelevel` against mixed case.
+concmap_r https://tfcma.s3.us-east-2.amazonaws.com/concmap_r.zip
+axlconc8b https://tfcma.s3.us-east-2.amazonaws.com/axlconc8b.zip
+concmap_tg https://tfcma.s3.us-east-2.amazonaws.com/concmap_tg.zip
+k_concmap https://tfcma.s3.us-east-2.amazonaws.com/K_ConcMap.zip
+concmap_cze https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze.zip
+concmap2 https://tfcma.s3.us-east-2.amazonaws.com/concmap2.zip
+skeeconc https://tfcma.s3.us-east-2.amazonaws.com/skeeconc.zip
+tayconc https://tfcma.s3.us-east-2.amazonaws.com/tayconc.zip
+newb_conc https://tfcma.s3.us-east-2.amazonaws.com/newb_conc.zip
+esad_newbconc https://tfcma.s3.us-east-2.amazonaws.com/esad_newbconc.zip
+rjumptfc https://tfcma.s3.us-east-2.amazonaws.com/rjumpTFC.zip
+quad_rocket https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket.zip
+pyrojump https://tfcma.s3.us-east-2.amazonaws.com/pyrojump.zip
+rjstarters https://tfcma.s3.us-east-2.amazonaws.com/rjstarters.zip
+rjump2 https://tfcma.s3.us-east-2.amazonaws.com/rjump2.zip
+mjump1 https://tfcma.s3.us-east-2.amazonaws.com/mjump1.zip
+training https://tfcma.s3.us-east-2.amazonaws.com/training.zip
+jumperz https://tfcma.s3.us-east-2.amazonaws.com/jumperz.zip
+phsyco_ward_r https://tfcma.s3.us-east-2.amazonaws.com/phsyco_ward_r.zip
+58thv2 https://tfcma.s3.us-east-2.amazonaws.com/58THV2.zip
