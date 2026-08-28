@@ -272,6 +272,59 @@ republish of a mutable tag (`jives/hlds:cstrike`) forces a rebuild.
 
 Bump the `respawn-image-v1` salt in `computeImageTag` to force a fleet-wide rebuild.
 
+### Custom game content: the layout is the game's, the selection is yours
+
+A service shipping custom maps uses this shape. `tfc` is the reference; `quake3`,
+`quake1` and any future skill-map service should follow it rather than reinvent:
+
+```
+apps/<svc>/…/content/        gitignored payload — layout dictated by the GAME
+apps/<svc>/…/maps.txt        tracked manifest: <name> <category> <url>
+apps/<svc>/…/mapcycles/      tracked, GENERATED from maps.txt
+apps/<svc>/…/scripts/        fetch-content, generate-mapcycles, publish-fastdl
+```
+
+**Do not try to organise `content/`.** GoldSrc needs a flat `tfc/maps/*.bsp` with wads
+at the game-dir root; nesting by category breaks every map. Organise the *manifest*
+instead — that is what "skill maps only" actually needs.
+
+`maps.txt` is the single source of truth. `scripts/generate-mapcycles.sh` derives the
+cycles from its category column; the results are **tracked** so the image can COPY them
+without running the generator at build time, and so drift shows up as a diff in review.
+Hand-writing a cycle instead means it silently stops matching the manifest the first
+time somebody adds a map — mapchooser just never offers the new one.
+
+Selecting a cycle (`GAME_ENV_MAPCYCLE=skill`) is an **env change, not a rebuild** —
+every cycle ships in the image, so it is a new task definition and a restart. Only
+*adding a map* forces a rebuild, because the `.bsp` is COPYed and covered by the image
+content hash. An unknown cycle name aborts the container with the valid list rather
+than booting with a vote that has nothing to offer.
+
+### Custom game content is a two-sided change: image AND FastDL
+
+A service that ships custom maps (`apps/tfc/variants/modded`) keeps them in a
+gitignored `content/` dir, rebuilt from a tracked manifest with
+`pnpm tfc:content:fetch`. Docker's build context ignores `.gitignore`, so they are
+still COPYed into the image and still covered by the content hash — a new map changes
+the tag and forces exactly one rebuild.
+
+Adding a map therefore needs **both** halves:
+
+| Half | Command | Skipping it means |
+|------|---------|-------------------|
+| Server | manifest → `content:fetch` → deploy | `changelevel <map>` fails; the server has no file |
+| Client | `pnpm tfc:content:publish <bucket> <profile>` | Joiners crawl at HLDS's 8 kB/s cap and time out |
+
+Plus `mapcycle.txt`, or the vote never offers it.
+
+S3 is a **pre-play step, not a runtime dependency** — the server never reads the
+bucket, only players do, so an empty or stale bucket makes joins slow but cannot stop
+the server starting. Keep it that way: moving content fetch into the boot path trades
+a safe failure mode for an unsafe one.
+
+The FastDL bucket must be public-read (GoldSrc clients send no credentials), so treat
+anything uploaded as openly downloadable.
+
 ### CPU and memory must be a valid Fargate pair
 
 `loader.ts` validates against the AWS matrix and fails fast. `CPU=256` allows 512–2048 MiB;

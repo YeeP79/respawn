@@ -85,8 +85,10 @@ RUN sed -i -E 's#^;(stats|statssounds|stats_logging|telemenu)\.amxx#\1.amxx#' \
 # covered by the image content hash. Refresh it with `pnpm tfc:content:fetch`.
 COPY --chown=steam:steam apps/tfc/variants/modded/content/tfc/ /opt/steam/hlds/tfc/
 
-# The rotation mapchooser votes from.
-COPY --chown=steam:steam apps/tfc/variants/modded/mapcycle.txt /opt/steam/hlds/tfc/mapcycle.txt
+# The rotations mapchooser can vote from. Generated from maps.txt by
+# scripts/generate-mapcycles.sh and tracked, so the build needs no generator. Which one
+# is active is GAME_ENV_MAPCYCLE, an env change rather than a rebuild.
+COPY --chown=steam:steam apps/tfc/variants/modded/mapcycles/ /opt/steam/hlds/tfc/mapcycles/
 
 COPY apps/tfc/variants/modded/respawn-init.sh /respawn-init.sh
 

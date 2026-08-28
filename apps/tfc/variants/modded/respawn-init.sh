@@ -39,6 +39,11 @@ AMXX_ADMIN_PASSWORD="${AMXX_ADMIN_PASSWORD:-}"
 # seconds. Measured on this build 2026-08-27. It also disables map VOTING, because
 # mapchooser opens its vote near map end and a map that never runs never gets there.
 TIMELIMIT="${TIMELIMIT:-30}"
+# Which generated cycle mapchooser votes from: all | skill | conc | rocket | stock.
+# Switching this is an ENV change, not a rebuild: every cycle file ships in the image,
+# so a new task definition and restart is all it takes. Only ADDING a map needs a
+# rebuild, because the .bsp itself is COPYed and covered by the image content hash.
+MAPCYCLE="${MAPCYCLE:-all}"
 
 # Overwrites the image's stock server.cfg. Safe: tfc has no persistent volume and
 # no SteamCMD install step, so nothing else writes this file. Rewritten every start,
@@ -50,7 +55,7 @@ TIMELIMIT="${TIMELIMIT:-30}"
   if [ -n "${RCON_PASSWORD}" ]; then
     echo "rcon_password \"${RCON_PASSWORD}\""
   fi
-  echo "mapcyclefile \"mapcycle.txt\""
+  echo "mapcyclefile \"mapcycles/${MAPCYCLE}.txt\""
   echo "mp_timelimit ${TIMELIMIT}"
   # Clients must be allowed to download, and to fetch from the FastDL host.
   echo "sv_allowdownload 1"
@@ -77,6 +82,15 @@ if [ -n "${RCON_PASSWORD}" ]; then rcon_state="set"; else rcon_state="unset (rco
 if [ -n "${FASTDL_URL}" ]; then fastdl_state="${FASTDL_URL}"; else fastdl_state="disabled"; fi
 echo "Respawn: wrote ${CFG} (hostname=${SERVERNAME}, rcon ${rcon_state})"
 echo "Respawn: fastdl ${fastdl_state}; amxx ${amxx_state}; timelimit ${TIMELIMIT}m"
+# Fail loudly rather than boot with a cycle the vote cannot read: a missing file
+# leaves mapchooser with nothing to offer, which looks like "voting is broken".
+CYCLE_FILE="${DIR}/mapcycles/${MAPCYCLE}.txt"
+if [ ! -f "${CYCLE_FILE}" ]; then
+  echo "Respawn: FATAL - no such mapcycle '${MAPCYCLE}'. Available:" >&2
+  ls "${DIR}/mapcycles/" 2>/dev/null | sed 's/\.txt$//' | sed 's/^/  /' >&2
+  exit 78
+fi
+echo "Respawn: mapcycle ${MAPCYCLE} ($(grep -vc '^//' "${CYCLE_FILE}") maps)"
 
 # Hand off to the upstream hlds entrypoint, preserving CONTAINER_COMMAND args.
 cd /opt/steam/hlds

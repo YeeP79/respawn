@@ -10,8 +10,10 @@ content="$here/content"
 work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 
 mkdir -p "$content"
-while read -r name url; do
+# maps.txt is <name> <category> <url>; category drives mapcycle generation, not fetch.
+while read -r name category url; do
   case "$name" in ''|\#*) continue ;; esac
+  [ -n "${url:-}" ] || { echo "malformed line for ${name}: expected <name> <category> <url>" >&2; exit 1; }
   echo "  fetching $name"
   curl -fsSL -m 120 -o "$work/$name.zip" \
     -H "Referer: https://tfcmaps.net/" \

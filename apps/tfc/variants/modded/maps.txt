@@ -1,24 +1,49 @@
-# One map per line: <name> <url>. Consumed by fetch-content.sh.
-# Source: tfcmaps.net archive (all 20 listed there as Working).
-# The three mixed-case archives (58THV2, K_ConcMap, rjumpTFC) are lowercased on
-# extract: GoldSrc on Linux will not resolve `changelevel` against mixed case.
-concmap_r https://tfcma.s3.us-east-2.amazonaws.com/concmap_r.zip
-axlconc8b https://tfcma.s3.us-east-2.amazonaws.com/axlconc8b.zip
-concmap_tg https://tfcma.s3.us-east-2.amazonaws.com/concmap_tg.zip
-k_concmap https://tfcma.s3.us-east-2.amazonaws.com/K_ConcMap.zip
-concmap_cze https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze.zip
-concmap2 https://tfcma.s3.us-east-2.amazonaws.com/concmap2.zip
-skeeconc https://tfcma.s3.us-east-2.amazonaws.com/skeeconc.zip
-tayconc https://tfcma.s3.us-east-2.amazonaws.com/tayconc.zip
-newb_conc https://tfcma.s3.us-east-2.amazonaws.com/newb_conc.zip
-esad_newbconc https://tfcma.s3.us-east-2.amazonaws.com/esad_newbconc.zip
-rjumptfc https://tfcma.s3.us-east-2.amazonaws.com/rjumpTFC.zip
-quad_rocket https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket.zip
-pyrojump https://tfcma.s3.us-east-2.amazonaws.com/pyrojump.zip
-rjstarters https://tfcma.s3.us-east-2.amazonaws.com/rjstarters.zip
-rjump2 https://tfcma.s3.us-east-2.amazonaws.com/rjump2.zip
-mjump1 https://tfcma.s3.us-east-2.amazonaws.com/mjump1.zip
-training https://tfcma.s3.us-east-2.amazonaws.com/training.zip
-jumperz https://tfcma.s3.us-east-2.amazonaws.com/jumperz.zip
-phsyco_ward_r https://tfcma.s3.us-east-2.amazonaws.com/phsyco_ward_r.zip
-58thv2 https://tfcma.s3.us-east-2.amazonaws.com/58THV2.zip
+# TFC modded map manifest — one map per line: <name> <url>.
+#
+# ADDING A MAP IS A TWO-SIDED CHANGE. Do both, or it is broken in one direction:
+#
+#   SERVER  add the line here, then `pnpm tfc:content:fetch`, then rebuild+deploy.
+#           The maps are COPYed into the image, and the image tag is a content hash
+#           over the Dockerfile plus every COPYed file — so a new map changes the tag
+#           and forces exactly one rebuild. Skip this and `changelevel <map>` fails:
+#           the server does not have the file, whatever is in S3.
+#
+#   CLIENT  `pnpm tfc:content:publish <bucket> <profile>` to mirror it to FastDL.
+#           Skip this and the map loads fine but every joining player pulls it at
+#           HLDS's own 8 kB/s transfer cap and will usually time out instead of
+#           joining. S3 is a pre-play step, NOT a runtime dependency: the server
+#           never reads from the bucket, so an empty or stale bucket only makes
+#           joins slow — it cannot stop the server starting.
+#
+#   VOTE    add it to mapcycle.txt too, or mapchooser never offers it.
+#
+# Source: tfcmaps.net archive (all 20 listed there as Working). The three mixed-case
+# archives (58THV2, K_ConcMap, rjumpTFC) are lowercased on extract: GoldSrc on Linux
+# will not resolve `changelevel` against mixed case.#
+# COLUMNS: <name> <category> <url>
+# Category drives mapcycle generation (scripts/generate-mapcycles.sh), which is how
+# "skill maps only" is expressed. The FILES cannot be organised — GoldSrc requires a
+# flat tfc/maps/*.bsp and wads at tfc/ root — so selection is the thing to organise.
+#   conc    scout/medic concussion-jump tracks
+#   rocket  soldier rocket/grenade-jump tracks
+#   mixed   both, or multi-skill (DM arena + jump course)
+axlconc8b      conc    https://tfcma.s3.us-east-2.amazonaws.com/axlconc8b.zip
+concmap2       conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap2.zip
+concmap_cze    conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze.zip
+concmap_r      conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_r.zip
+concmap_tg     conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_tg.zip
+esad_newbconc  conc    https://tfcma.s3.us-east-2.amazonaws.com/esad_newbconc.zip
+k_concmap      conc    https://tfcma.s3.us-east-2.amazonaws.com/K_ConcMap.zip
+newb_conc      conc    https://tfcma.s3.us-east-2.amazonaws.com/newb_conc.zip
+skeeconc       conc    https://tfcma.s3.us-east-2.amazonaws.com/skeeconc.zip
+tayconc        conc    https://tfcma.s3.us-east-2.amazonaws.com/tayconc.zip
+58thv2         mixed   https://tfcma.s3.us-east-2.amazonaws.com/58THV2.zip
+jumperz        mixed   https://tfcma.s3.us-east-2.amazonaws.com/jumperz.zip
+phsyco_ward_r  mixed   https://tfcma.s3.us-east-2.amazonaws.com/phsyco_ward_r.zip
+training       mixed   https://tfcma.s3.us-east-2.amazonaws.com/training.zip
+mjump1         rocket  https://tfcma.s3.us-east-2.amazonaws.com/mjump1.zip
+pyrojump       rocket  https://tfcma.s3.us-east-2.amazonaws.com/pyrojump.zip
+quad_rocket    rocket  https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket.zip
+rjstarters     rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjstarters.zip
+rjump2         rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjump2.zip
+rjumptfc       rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjumpTFC.zip

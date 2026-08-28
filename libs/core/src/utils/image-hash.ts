@@ -11,8 +11,16 @@ export interface ImageInputs {
   dockerfile: string;
   /** Resolved digest of the `FROM` base, e.g. `sha256:ab22…`. */
   baseDigest: string;
-  /** Contents of every file the Dockerfile COPYs, keyed by repo-relative path. */
-  copiedFiles: Record<string, string>;
+  /**
+   * Contents of every file the Dockerfile COPYs, keyed by repo-relative path.
+   *
+   * Buffers, not strings. These were read as UTF-8 until services began COPYing
+   * binary game content (49 MB of .bsp/.wad for tfc): decoding a binary collapses
+   * every invalid byte sequence to U+FFFD, so the hash saw a lossy version of each
+   * file and two different maps could in principle produce the same tag. That would
+   * silently defeat the one guarantee this module exists to provide.
+   */
+  copiedFiles: Record<string, Buffer>;
 }
 
 /** Matches `FROM <ref>` ignoring `--platform=`, stage aliases and comments. */
@@ -65,7 +73,7 @@ export function collectImageInputs(
   baseDigest: string,
 ): ImageInputs {
   const dockerfile = fs.readFileSync(dockerfilePath, 'utf-8');
-  const copiedFiles: Record<string, string> = {};
+  const copiedFiles: Record<string, Buffer> = {};
 
   for (const source of parseCopySources(dockerfile)) {
     const absolute = path.resolve(workspaceRoot, source);
@@ -74,14 +82,11 @@ export function collectImageInputs(
       for (const entry of fs.readdirSync(absolute, { recursive: true })) {
         const child = path.join(absolute, String(entry));
         if (fs.statSync(child).isFile()) {
-          copiedFiles[path.relative(workspaceRoot, child)] = fs.readFileSync(
-            child,
-            'utf-8',
-          );
+          copiedFiles[path.relative(workspaceRoot, child)] = fs.readFileSync(child);
         }
       }
     } else {
-      copiedFiles[source] = fs.readFileSync(absolute, 'utf-8');
+      copiedFiles[source] = fs.readFileSync(absolute);
     }
   }
 

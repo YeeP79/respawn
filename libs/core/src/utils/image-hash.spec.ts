@@ -10,7 +10,7 @@ function inputs(overrides: Partial<ImageInputs> = {}): ImageInputs {
   return {
     dockerfile: 'FROM jives/hlds:cstrike\nCOPY apps/cs16/respawn-init.sh /x\n',
     baseDigest: 'sha256:aaaa',
-    copiedFiles: { 'apps/cs16/respawn-init.sh': '#!/bin/sh\necho hi\n' },
+    copiedFiles: { 'apps/cs16/respawn-init.sh': Buffer.from('#!/bin/sh\necho hi\n') },
     ...overrides,
   };
 }
@@ -89,20 +89,33 @@ describe('computeImageTag', () => {
     // The uncommitted-shim-edit case: a git SHA would not notice this.
     expect(
       computeImageTag(
-        inputs({ copiedFiles: { 'apps/cs16/respawn-init.sh': 'different' } }),
+        inputs({ copiedFiles: { 'apps/cs16/respawn-init.sh': Buffer.from('different') } }),
       ),
     ).not.toBe(computeImageTag(inputs()));
   });
 
   it('does not depend on file enumeration order', () => {
-    const a = computeImageTag(inputs({ copiedFiles: { a: '1', b: '2' } }));
-    const b = computeImageTag(inputs({ copiedFiles: { b: '2', a: '1' } }));
+    const a = computeImageTag(inputs({ copiedFiles: { a: Buffer.from('1'), b: Buffer.from('2') } }));
+    const b = computeImageTag(inputs({ copiedFiles: { b: Buffer.from('2'), a: Buffer.from('1') } }));
     expect(a).toBe(b);
   });
 
   it('distinguishes content moved between files', () => {
-    const a = computeImageTag(inputs({ copiedFiles: { a: 'x', b: '' } }));
-    const b = computeImageTag(inputs({ copiedFiles: { a: '', b: 'x' } }));
+    const a = computeImageTag(inputs({ copiedFiles: { a: Buffer.from('x'), b: Buffer.alloc(0) } }));
+    const b = computeImageTag(inputs({ copiedFiles: { a: Buffer.alloc(0), b: Buffer.from('x') } }));
     expect(a).not.toBe(b);
+  });
+
+  // Two DIFFERENT binaries whose bytes are both invalid UTF-8. Read as strings they
+  // both decode to U+FFFD and collide; read as bytes they must not. This is why
+  // copiedFiles is Buffer — services now COPY 49 MB of .bsp/.wad game content.
+  it('distinguishes binary files that decode to the same UTF-8 replacement chars', () => {
+    const a = computeImageTag(inputs({ copiedFiles: { m: Buffer.from([0xff, 0xfe]) } }));
+    const b = computeImageTag(inputs({ copiedFiles: { m: Buffer.from([0xff, 0xfd]) } }));
+    expect(a).not.toBe(b);
+    // Guard the premise: these really are indistinguishable once decoded.
+    expect(Buffer.from([0xff, 0xfe]).toString('utf-8')).toBe(
+      Buffer.from([0xff, 0xfd]).toString('utf-8'),
+    );
   });
 });
