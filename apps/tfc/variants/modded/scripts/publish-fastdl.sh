@@ -3,6 +3,7 @@
 #
 #   publish-fastdl.sh <bucket> [profile]            upload
 #   publish-fastdl.sh <bucket> [profile] --clear    remove everything under tfc/
+#   publish-fastdl.sh <bucket> [profile] --clear --yes   ditto, no interactive prompt
 #
 # Why this exists: HLDS throttles its OWN file transfer to 8 kB/s, so a client joining
 # fresh would pull ~49 MB at that rate and time out rather than join. The bucket must
@@ -18,9 +19,14 @@ set -euo pipefail
 bucket="${1:?usage: publish-fastdl.sh <bucket-name> [aws-profile] [--clear]}"
 profile=""
 clear_mode=0
+assume_yes=0
 for arg in "${@:2}"; do
   case "$arg" in
     --clear) clear_mode=1 ;;
+    # For non-interactive callers (the MCP's clear_content) that have ALREADY made the
+    # caller confirm. Without it the prompt below reads EOF from a closed stdin, gets an
+    # empty string, and aborts — safe, but it means the tool can never work.
+    --yes) assume_yes=1 ;;
     *) profile="$arg" ;;
   esac
 done
@@ -36,9 +42,11 @@ if [ "$clear_mode" -eq 1 ]; then
   # clients send no credentials), so content left there stays openly downloadable.
   echo "About to DELETE everything under s3://$bucket/tfc/"
   aws s3 ls "s3://$bucket/tfc/" --recursive "${args[@]}" | tail -5
-  printf 'Type the bucket name to confirm: '
-  read -r confirm
-  [ "$confirm" = "$bucket" ] || { echo "aborted (got '$confirm')" >&2; exit 1; }
+  if [ "$assume_yes" -eq 0 ]; then
+    printf 'Type the bucket name to confirm: '
+    read -r confirm
+    [ "$confirm" = "$bucket" ] || { echo "aborted (got '$confirm')" >&2; exit 1; }
+  fi
   aws s3 rm "s3://$bucket/tfc" --recursive "${args[@]}"
   echo "cleared. Unset GAME_ENV_FASTDL_URL, or joiners fall back to the 8 kB/s path."
   exit 0

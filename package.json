@@ -18,7 +18,8 @@
     "respawn:push": "tsx --conditions development apps/cli/src/index.ts --non-interactive --action push --profile respawn --environment dev --service 7dtd,cs16,cs16-dm,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,tfc-vanilla,ut99,ut99-vanilla,valheim,wolfet",
     "respawn:check-updates": "tsx --conditions development apps/cli/src/index.ts --non-interactive --action updates --profile respawn --environment dev --service 7dtd,cs16,cs16-dm,cs2,css,doom2,gmod,l4d2,quake3,quakelive,rust,tf2,tfc,tfc-vanilla,ut99,ut99-vanilla,valheim,wolfet",
     "tfc:content:fetch": "bash apps/tfc/variants/modded/scripts/fetch-content.sh",
-    "tfc:content:publish": "bash apps/tfc/variants/modded/scripts/publish-fastdl.sh"
+    "tfc:content:publish": "bash apps/tfc/variants/modded/scripts/publish-fastdl.sh",
+    "tfc:content:check": "bash apps/tfc/variants/modded/scripts/check-content.sh"
   },
   "private": true,
   "devDependencies": {

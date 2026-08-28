@@ -1,5 +1,8 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import { randomInt } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
   McpServer,
   ResourceTemplate,
@@ -194,6 +197,54 @@ async function runAndFormat(service: string, command: string, opts: { write?: bo
     );
   }
   return textResult(result.output || '(no output)');
+}
+
+
+/**
+ * Runs a content script a service ships in its own `scripts/` dir.
+ *
+ * Deliberately generic: the MCP does not know what a map is, only that a service may
+ * declare `scripts/<name>.sh` — the same "run what it declares" rule the rcon manifests
+ * follow. A service without the script gets a clear answer rather than a stack trace.
+ *
+ * Output is returned VERBATIM. These scripts already explain their own failures and
+ * name the fix; re-wording them here would mean two descriptions of the same failure
+ * drifting apart.
+ */
+async function runContentScript(
+  servicePath: string,
+  scriptName: string,
+  args: string[],
+): Promise<{ exitCode: number; output: string }> {
+  const script = path.join(servicePath, 'scripts', `${scriptName}.sh`);
+  if (!fs.existsSync(script)) {
+    return {
+      exitCode: 127,
+      output:
+        `This service ships no scripts/${scriptName}.sh. Content tooling is per-service; ` +
+        `only services with a custom content payload (see apps/tfc/variants/modded) have it.`,
+    };
+  }
+  return new Promise((resolve) => {
+    const child = spawn('bash', [script, ...args], {
+      cwd: WORKSPACE_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    child.on('close', (code) => resolve({ exitCode: code ?? 1, output: out }));
+    child.on('error', (err) => resolve({ exitCode: 1, output: err.message }));
+  });
+}
+
+/** Bucket from an explicit arg, else parsed out of the service's FASTDL_URL. */
+function resolveBucket(explicit: string | undefined, gameEnv: Record<string, string>): string | null {
+  if (explicit) return explicit;
+  const url = gameEnv['FASTDL_URL'];
+  if (!url) return null;
+  const m = /^https?:\/\/([^.]+)\.s3[.-]/.exec(url);
+  return m?.[1] ?? null;
 }
 
 const server = new McpServer({ name: 'respawn-rcon', version: '0.1.0' });
@@ -1116,6 +1167,120 @@ server.registerTool(
         region: REGION,
       }),
     );
+  },
+);
+
+server.registerTool(
+  'check_content',
+  {
+    title: 'Check content is launch-ready',
+    description:
+      "Verify BOTH halves of a service's custom content before launching, and report " +
+      'what is wrong. The halves drift independently and both fail silently at launch: ' +
+      'if the pushed image predates a map you added, `changelevel` fails outright; if ' +
+      "FastDL is missing files, the map loads but joiners fall back to HLDS's 8 kB/s " +
+      'cap and time out instead of connecting. Read-only, always available. Run before ' +
+      'deploy or scale, not after a player complains.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "tfc"'),
+      environment: environmentSchema,
+      bucket: z.string().optional().describe('FastDL bucket; defaults to the FASTDL_URL one.'),
+      cycle: z.string().optional().describe('Mapcycle to check, e.g. "skill". Default: all.'),
+    },
+  },
+  async ({ service, environment, bucket, cycle }) => {
+    const svc = resolveConfiguredService(service, environment);
+    const resolved = resolveBucket(bucket, svc.config.gameEnvVars);
+    if (!resolved) {
+      return textResult(
+        `No bucket given and ${service} has no GAME_ENV_FASTDL_URL to infer one from. ` +
+          'Pass bucket explicitly, or set FASTDL_URL once content is published.',
+        true,
+      );
+    }
+    const args = [resolved];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    if (cycle) args.push('--cycle', cycle);
+    const r = await runContentScript(svc.path, 'check-content', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'publish_content',
+  {
+    title: 'Publish content to FastDL',
+    description:
+      "Mirror a service's content payload to its FastDL bucket so joining players " +
+      "download at full speed rather than HLDS's 8 kB/s cap. A PRE-PLAY step, not a " +
+      'runtime dependency: the server never reads the bucket, so publishing late only ' +
+      'makes joins slow. The prefix must be PUBLIC-READ (game clients send no ' +
+      'credentials), so anything published is openly downloadable. Requires ' +
+      'RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "tfc"'),
+      environment: environmentSchema,
+      bucket: z.string().optional().describe('Target bucket; defaults to the FASTDL_URL one.'),
+    },
+  },
+  async ({ service, environment, bucket }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult(
+        'Content publishing is disabled. Set RESPAWN_ALLOW_DEPLOYS=true. check_content ' +
+          'is read-only and always available.',
+        true,
+      );
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const resolved = resolveBucket(bucket, svc.config.gameEnvVars);
+    if (!resolved) return textResult(`No bucket given and ${service} has no FASTDL_URL.`, true);
+    const args = [resolved];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    const r = await runContentScript(svc.path, 'publish-fastdl', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'clear_content',
+  {
+    title: 'Clear published FastDL content',
+    description:
+      "Remove a service's published content from its FastDL bucket — the teardown for " +
+      'the pre-play publish. Worth doing after a session, because the prefix is ' +
+      'public-read by necessity and content left there stays openly downloadable. ' +
+      'DESTRUCTIVE and irreversible: confirm must equal the bucket name, the same guard ' +
+      'the shell script uses. Requires RESPAWN_ALLOW_DEPLOYS=true. Unset ' +
+      'GAME_ENV_FASTDL_URL afterwards so config and bucket stay in step.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "tfc"'),
+      environment: environmentSchema,
+      bucket: z.string().optional().describe('Target bucket; defaults to the FASTDL_URL one.'),
+      confirm: z.string().describe('Must equal the bucket name.'),
+    },
+  },
+  async ({ service, environment, bucket, confirm }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Content clearing is disabled. Set RESPAWN_ALLOW_DEPLOYS=true.', true);
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const resolved = resolveBucket(bucket, svc.config.gameEnvVars);
+    if (!resolved) return textResult(`No bucket given and ${service} has no FASTDL_URL.`, true);
+    if (confirm !== resolved) {
+      return textResult(
+        `confirm must equal the bucket name. Got "${confirm}", expected "${resolved}". ` +
+          'Nothing was deleted.',
+        true,
+      );
+    }
+    const args = [resolved];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    // --yes because this tool already required `confirm` to match the bucket name.
+    // Without it the script prompts on a stdin the MCP has closed, reads EOF, and
+    // aborts every time — safe, but the tool would never do anything.
+    args.push('--clear', '--yes');
+    const r = await runContentScript(svc.path, 'publish-fastdl', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
   },
 );
 

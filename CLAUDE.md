@@ -317,6 +317,19 @@ Adding a map therefore needs **both** halves:
 
 Plus `mapcycle.txt`, or the vote never offers it.
 
+**Check before launching, not after:** `pnpm tfc:content:check <bucket> <profile>
+[--cycle <name>]`, or the MCP's `check_content` verifies both halves and exits non-zero on either — that the current
+content corresponds to a tag actually in ECR (so the image is not older than a map you
+added), and that FastDL carries every `.bsp` and `.wad` the chosen cycle needs. Both
+failures are otherwise silent until a player cannot join.
+
+The MCP mirrors all three, returning the scripts' output verbatim so a failure reads
+the same either way: `check_content` (read-only, always available), `publish_content`
+and `clear_content` (both need `RESPAWN_ALLOW_DEPLOYS=true`; clear also needs
+`confirm` set to the bucket name). They are generic — the MCP looks for
+`<service-path>/scripts/<name>.sh` and says so plainly when a service has none, the
+same "run what the service declares" rule the rcon manifests follow.
+
 S3 is a **pre-play step, not a runtime dependency** — the server never reads the
 bucket, only players do, so an empty or stale bucket makes joins slow but cannot stop
 the server starting. Keep it that way: moving content fetch into the boot path trades
