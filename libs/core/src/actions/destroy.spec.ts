@@ -8,7 +8,11 @@ const mockRunCdk = vi.mocked(runCdk);
 function ctx(overrides: Partial<DestroyContext> = {}): DestroyContext {
   return {
     // Only the fields destroy reads are needed.
-    service: { name: 'ut99', path: '', config: {} as never },
+    service: {
+      name: 'ut99',
+      path: '',
+      config: { aws: { region: 'us-east-2', profile: 'work' } } as never,
+    },
     environment: 'dev',
     workspaceRoot: '/ws',
     ...overrides,

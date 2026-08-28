@@ -43,7 +43,7 @@ export async function destroy(ctx: DestroyContext): Promise<ActionResult> {
       stacks: [serviceStackId(environment, service.name), sharedStackId(environment)],
       context: { environment, services: service.name, workspaceRoot },
       workspaceRoot,
-      profile: ctx.profile,
+      profile: ctx.profile ?? service.config.aws.profile,
       verbose: ctx.verbose,
       force: true, // CDK destroy always needs --force to skip its y/n prompt
     });

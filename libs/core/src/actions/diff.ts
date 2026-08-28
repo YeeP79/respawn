@@ -27,7 +27,7 @@ export async function diff(ctx: DiffContext): Promise<ActionResult> {
         workspaceRoot,
       },
       workspaceRoot,
-      profile: ctx.profile,
+      profile: ctx.profile ?? service.config.aws.profile,
       verbose: ctx.verbose,
     });
 

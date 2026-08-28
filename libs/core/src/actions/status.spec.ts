@@ -6,7 +6,11 @@ vi.mock('../aws/exec.js', () => ({ runAws: vi.fn() }));
 const mockRunAws = vi.mocked(runAws);
 
 const ctx: StatusContext = {
-  service: { name: 'ut99', path: '', config: {} as never },
+  service: {
+    name: 'ut99',
+    path: '',
+    config: { aws: { region: 'us-east-2', profile: 'work' } } as never,
+  },
   environment: 'dev',
 };
 
@@ -65,8 +69,33 @@ describe('fetchServiceStatus', () => {
 
   it('queries the correctly-named cluster and service', async () => {
     mockRunAws.mockResolvedValueOnce(reply({ stdout: JSON.stringify({ services: [{ status: 'ACTIVE', runningCount: 1, desiredCount: 1 }] }) }));
-    await fetchServiceStatus({ service: { name: 'ut99-vanilla', path: '', config: {} as never }, environment: 'prod' });
+    await fetchServiceStatus({
+      service: {
+        name: 'ut99-vanilla',
+        path: '',
+        config: { aws: { region: 'us-east-2', profile: 'work' } } as never,
+      },
+      environment: 'prod',
+    });
     const args = mockRunAws.mock.calls[0]![0];
     expect(args).toContain('respawn-prod-ut99-vanilla');
+  });
+  // A service deployed outside its profile's default region used to report "not deployed"
+  // — the AWS CLI silently queried the default region and found nothing, which inverts the
+  // answer rather than failing. Measured against ut99 in us-east-2 on 2026-08-27.
+  it('queries the region and profile declared by the service, not the profile default', async () => {
+    mockRunAws.mockResolvedValueOnce(
+      reply({ stdout: JSON.stringify({ services: [{ status: 'ACTIVE', runningCount: 1, desiredCount: 1 }] }) }),
+    );
+    await fetchServiceStatus(ctx);
+    expect(mockRunAws.mock.calls[0]![1]).toEqual({ region: 'us-east-2', profile: 'work' });
+  });
+
+  it('lets an explicit region and profile override the service config', async () => {
+    mockRunAws.mockResolvedValueOnce(
+      reply({ stdout: JSON.stringify({ services: [{ status: 'ACTIVE', runningCount: 1, desiredCount: 1 }] }) }),
+    );
+    await fetchServiceStatus({ ...ctx, region: 'us-west-1', profile: 'personal' });
+    expect(mockRunAws.mock.calls[0]![1]).toEqual({ region: 'us-west-1', profile: 'personal' });
   });
 });

@@ -146,6 +146,11 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
   const { service, environment, workspaceRoot } = ctx;
   const { config } = service;
 
+  // The same resolution preflight() uses. CDK must run as the identity preflight just
+  // validated against AWS_ACCOUNT_ID — passing the raw ctx.profile let a deploy with no
+  // --profile check one identity and then invoke CDK as the ambient default.
+  const profile = ctx.profile ?? config.aws.profile;
+
   // Deploy-time prompt answers travel to the CDK app via context (the app runs
   // in a separate process and re-loads config, so in-memory edits wouldn't reach it).
   const overrideCtx: Record<string, string> =
@@ -173,7 +178,7 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
         },
         workspaceRoot,
         requireApproval: ctx.requireApproval,
-        profile: ctx.profile,
+        profile,
         verbose: ctx.verbose,
         force: ctx.force,
       });
@@ -223,7 +228,7 @@ export async function deploy(ctx: DeployContext): Promise<ActionResult> {
       },
       workspaceRoot,
       requireApproval: ctx.requireApproval,
-      profile: ctx.profile,
+      profile,
       verbose: ctx.verbose,
       force: ctx.force,
     });

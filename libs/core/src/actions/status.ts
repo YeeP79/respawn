@@ -6,6 +6,8 @@ export interface StatusContext {
   service: DiscoveredService;
   environment: Environment;
   profile?: string;
+  /** Overrides the service's configured region; unset means config.aws.region. */
+  region?: string;
 }
 
 /** A service's live state. `not-deployed` = no cluster/service; `not-found` = cluster
@@ -55,7 +57,15 @@ export async function fetchServiceStatus(ctx: StatusContext): Promise<ServiceSta
   const { service, environment } = ctx;
   const cluster = clusterName(environment, service.name);
   const ecsSvc = ecsServiceName(environment, service.name);
-  const opts = { region: undefined, profile: ctx.profile };
+  // Fall back to the service's configured region and profile, as deploy and scale do.
+  // There is no --region CLI flag, so ctx.region is normally undefined and the AWS CLI
+  // would silently use the profile's default region. For a service deployed outside that
+  // default the lookup then finds nothing and this reports "not deployed" — inverting the
+  // answer rather than failing, which is the state someone acts on by deploying again.
+  const opts = {
+    region: ctx.region ?? service.config.aws.region,
+    profile: ctx.profile ?? service.config.aws.profile,
+  };
 
   const describe = await runAws(
     ['ecs', 'describe-services', '--cluster', cluster, '--services', ecsSvc, '--output', 'json'],

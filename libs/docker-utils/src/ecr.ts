@@ -42,14 +42,15 @@ function run(
 export async function ecrLogin(
   registry: string,
   region: string,
+  profile?: string,
 ): Promise<void> {
-  // Get the login password from AWS
-  const passwordResult = await run('aws', [
-    'ecr',
-    'get-login-password',
-    '--region',
-    region,
-  ]);
+  // Get the login password from AWS. The profile has to be forwarded the same way
+  // imageTagExists below already does it: without it the AWS CLI falls back to the
+  // ambient default profile, so a service whose .env names its own profile fails
+  // here with ExpiredTokenException even though that profile is perfectly valid.
+  const args = ['ecr', 'get-login-password', '--region', region];
+  if (profile) args.push('--profile', profile);
+  const passwordResult = await run('aws', args);
 
   if (passwordResult.exitCode !== 0) {
     throw new Error('Failed to get ECR login password');

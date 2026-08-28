@@ -51,7 +51,10 @@ export async function scale(ctx: ScaleContext): Promise<ActionResult> {
       // outside that default the lookup then finds nothing and reports it as "not
       // deployed — deploy it first", which reads as a missing stack rather than a
       // wrong-region query.
-      { profile: ctx.profile, region: ctx.region ?? service.config.aws.region },
+      {
+        profile: ctx.profile ?? service.config.aws.profile,
+        region: ctx.region ?? service.config.aws.region,
+      },
     );
 
     if (res.exitCode !== 0) {

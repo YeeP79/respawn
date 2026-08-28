@@ -105,6 +105,10 @@ export async function buildAndPush(
 ): Promise<ResolvedImage> {
   const { config } = ctx.service;
   const region = config.aws.region;
+  // Same resolution as ecrLogin above and as deploy(): without the fallback, a run
+  // with no --profile invokes CDK with no credentials at all and fails on the shared
+  // stack, even though the service's .env names a perfectly good profile.
+  const profile = ctx.profile ?? config.aws.profile;
 
   if (resolved.alreadyPushed && !ctx.forceBuild) {
     logger.info(
@@ -124,7 +128,7 @@ export async function buildAndPush(
     },
     workspaceRoot: ctx.workspaceRoot,
     requireApproval: ctx.requireApproval,
-    profile: ctx.profile,
+    profile,
     verbose: ctx.verbose,
     force: ctx.force,
   });
@@ -152,7 +156,7 @@ export async function buildAndPush(
   }
 
   logger.info('Logging in to ECR...');
-  await ecrLogin(resolved.registry, region);
+  await ecrLogin(resolved.registry, region, profile);
 
   logger.info('Pushing image to ECR...');
   await pushImage({
