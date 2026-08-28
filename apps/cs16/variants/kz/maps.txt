@@ -1,0 +1,57 @@
+# CS 1.6 KZ map manifest — one map per line: <name> <type> <difficulty> <url>
+#
+# COLUMNS
+#   type        kreedz.com's own classification: Climb | Bhop | Mix | Slide | Special
+#   difficulty  kreedz.com's official tier, Beginner -> Death. This is the community's
+#               own rating, not an inference — stronger provenance than the TFC set,
+#               where no rating system existed and tiers had to be read out of prose.
+#   url         kreedz.com API. GET /api/map/<name> returns the zip as an attachment.
+#
+# SELECTION: shortlisted from the 1,148 recordable maps in /api/map/browse, then ranked
+# by the download count on /api/map/detail and taken top-N per difficulty tier. Weighted
+# toward Beginner..Medium, where a mixed-skill group actually plays, with a few harder
+# maps as a ramp. Non-recordable maps are excluded: the community does not count times
+# on them, which is the wrong default for a server built around times.
+#
+# ADDING A MAP IS A TWO-SIDED CHANGE — see apps/tfc/variants/modded/maps.txt and the
+# CLAUDE.md gotcha. Server half: fetch + rebuild + deploy, or `changelevel` fails.
+# Client half: publish to FastDL, or joiners crawl at HLDS's 8 kB/s cap.
+kz_bhopwarehouse        Special  Beginner     https://kreedz.com/api/map/kz_bhopwarehouse
+nfs_longjumpez          Special  Beginner     https://kreedz.com/api/map/nfs_longjumpez
+av_degyptianez          Climb    Beginner     https://kreedz.com/api/map/av_degyptianez
+kt_aztecclimb           Climb    Beginner     https://kreedz.com/api/map/kt_aztecclimb
+bkz_goldbhop            Bhop     Easy         https://kreedz.com/api/map/bkz_goldbhop
+kz_hopez                Bhop     Easy         https://kreedz.com/api/map/kz_hopez
+cg_coldbhop             Bhop     Easy         https://kreedz.com/api/map/cg_coldbhop
+kz_nolve                Climb    Easy         https://kreedz.com/api/map/kz_nolve
+j2s_4floors             Bhop     Easy         https://kreedz.com/api/map/j2s_4floors
+bkz_junglebhop          Bhop     Easy         https://kreedz.com/api/map/bkz_junglebhop
+kz_xj_ezbrickjump       Climb    Easy         https://kreedz.com/api/map/kz_xj_ezbrickjump
+clintmo_bhopbarrels     Bhop     Easy         https://kreedz.com/api/map/clintmo_bhopbarrels
+clintmo_bhopwarehouse   Bhop     Easy         https://kreedz.com/api/map/clintmo_bhopwarehouse
+kz_cg_lavacliff         Climb    Easy         https://kreedz.com/api/map/kz_cg_lavacliff
+kz_greattemple          Climb    Easy         https://kreedz.com/api/map/kz_greattemple
+kz_starwars_deeja       Climb    Easy         https://kreedz.com/api/map/kz_starwars_deeja
+kz_exodus_ez            Bhop     Easy-Medium  https://kreedz.com/api/map/kz_exodus_ez
+cg_wildwesthop          Bhop     Easy-Medium  https://kreedz.com/api/map/cg_wildwesthop
+kzm_cityhops            Bhop     Easy-Medium  https://kreedz.com/api/map/kzm_cityhops
+kz_chinabl0ck_ez        Climb    Easy-Medium  https://kreedz.com/api/map/kz_chinabl0ck_ez
+kz_j2s_nightcanyon      Climb    Easy-Medium  https://kreedz.com/api/map/kz_j2s_nightcanyon
+kzse_ancienthopez       Bhop     Easy-Medium  https://kreedz.com/api/map/kzse_ancienthopez
+kz_rd_giganticwall      Climb    Easy-Medium  https://kreedz.com/api/map/kz_rd_giganticwall
+kz_cg_venice            Bhop     Easy-Medium  https://kreedz.com/api/map/kz_cg_venice
+kz_absolute             Climb    Easy-Medium  https://kreedz.com/api/map/kz_absolute
+cg_cbblebhop            Bhop     Medium       https://kreedz.com/api/map/cg_cbblebhop
+cg_arizonabhop          Bhop     Medium       https://kreedz.com/api/map/cg_arizonabhop
+kz_megabhop_hard        Bhop     Medium       https://kreedz.com/api/map/kz_megabhop_hard
+kz_kzdk_droughthop      Bhop     Medium       https://kreedz.com/api/map/kz_kzdk_droughthop
+clintmo_bhoptoon        Bhop     Medium       https://kreedz.com/api/map/clintmo_bhoptoon
+kz_man_urbanjump        Climb    Medium       https://kreedz.com/api/map/kz_man_urbanjump
+kz_kzarg_catacombsbhop  Bhop     Medium       https://kreedz.com/api/map/kz_kzarg_catacombsbhop
+kz_j2s_summercliff_h    Climb    Medium       https://kreedz.com/api/map/kz_j2s_summercliff_h
+kz_xj_rockblock         Climb    Medium-Hard  https://kreedz.com/api/map/kz_xj_rockblock
+bkm_problock            Climb    Medium-Hard  https://kreedz.com/api/map/bkm_problock
+risk_forgeblock         Climb    Medium-Hard  https://kreedz.com/api/map/risk_forgeblock
+kz_man_redrock          Climb    Hard         https://kreedz.com/api/map/kz_man_redrock
+kz_northpole_b01        Climb    Hard         https://kreedz.com/api/map/kz_northpole_b01
+qsk_azure               Climb    Hard         https://kreedz.com/api/map/qsk_azure
