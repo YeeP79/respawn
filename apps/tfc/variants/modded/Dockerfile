@@ -65,6 +65,21 @@ RUN sed -i 's|^gamedll_linux .*|gamedll_linux "addons/metamod/dlls/metamod.so"|'
       /opt/steam/hlds/tfc/liblist.gam \
  && grep -q 'addons/metamod/dlls/metamod.so' /opt/steam/hlds/tfc/liblist.gam
 
+# Enable AMXX plugins the distribution ships but leaves commented out. Each has its
+# required module present in this image (TfcX, Fun), so this is a config change and
+# adds nothing third-party:
+#   stats          rank / K:D / per-death stats  - needs the TFC module, present
+#   statssounds    precache plugin the stats plugins need to play their sounds
+#   stats_logging  per-weapon stats logging      - needs the TFC module, present
+#   telemenu       teleport menu, admin can move a player - needs Fun, present
+# statssounds must be enabled ALONGSIDE stats, not instead of it: it only precaches.
+RUN sed -i -E 's#^;(stats|statssounds|stats_logging|telemenu)\.amxx#\1.amxx#' \
+      /opt/steam/hlds/tfc/addons/amxmodx/configs/plugins.ini \
+ && for p in stats statssounds stats_logging telemenu; do \
+      grep -qE "^${p}\.amxx" /opt/steam/hlds/tfc/addons/amxmodx/configs/plugins.ini \
+        || { echo "plugin ${p} not enabled"; exit 1; }; \
+    done
+
 # Custom map payload — maps/, the six .wad files, models, sprites, sounds, overviews.
 # Gitignored (see .gitignore) but present in the Docker build context, so it is still
 # covered by the image content hash. Refresh it with `pnpm tfc:content:fetch`.

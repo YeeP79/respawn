@@ -43,6 +43,19 @@ DM_BUYTIME="${DM_BUYTIME:--1}"
 # as 00:00 and map voting never opens.
 TIMELIMIT="${TIMELIMIT:-30}"
 
+# --- bunnyhop (ReGameDLL) ----------------------------------------------------
+# Also native cvars, so there is no bhop plugin here either. Off by default: bhop
+# changes the movement feel of every map, which is a bigger decision than deathmatch
+# and should be opted into rather than inherited.
+#   BHOP_AUTO   auto re-jump while the jump key is held
+#   BHOP_SPEED  allow speed to exceed the normal running cap (the actual "bhop")
+# Enabling AUTO without SPEED gives easy hops that never build velocity, which reads
+# as "bhop is broken" rather than as a setting.
+BHOP_AUTO="${BHOP_AUTO:-0}"
+BHOP_SPEED="${BHOP_SPEED:-0}"
+# Player jump height; ReGameDLL default is 45.
+JUMP_HEIGHT="${JUMP_HEIGHT:-45}"
+
 # Overwrites the image's stock server.cfg. Safe: cstrike has no persistent volume and
 # no SteamCMD install step, so nothing else writes this file.
 {
@@ -63,6 +76,10 @@ TIMELIMIT="${TIMELIMIT:-30}"
   echo "mp_buytime ${DM_BUYTIME}"
   echo "mp_auto_reload_weapons 1"
   echo "mp_refill_bpammo_weapons 2"
+  echo "// --- bunnyhop (ReGameDLL cvars; absent on stock cs.so) ---"
+  echo "sv_autobunnyhopping ${BHOP_AUTO}"
+  echo "sv_enablebunnyhopping ${BHOP_SPEED}"
+  echo "mp_jump_height ${JUMP_HEIGHT}"
 } > "${CFG}"
 
 # AMXX admin: "<name>" "<password>" "<flags>" "<access>". ce = check name, need password.
@@ -79,6 +96,7 @@ fi
 if [ -n "${RCON_PASSWORD}" ]; then rcon_state="set"; else rcon_state="unset (rcon disabled)"; fi
 echo "Respawn: wrote ${CFG} (hostname=${SERVERNAME}, rcon ${rcon_state})"
 echo "Respawn: dm respawn=${DM_RESPAWN_DELAY}s immunity=${DM_SPAWN_IMMUNITY}s randomspawn=${DM_RANDOM_SPAWN}; amxx ${amxx_state}"
+echo "Respawn: bhop auto=${BHOP_AUTO} speed=${BHOP_SPEED} jump_height=${JUMP_HEIGHT}"
 
 # Hand off to the upstream hlds entrypoint, preserving CONTAINER_COMMAND args.
 cd /opt/steam/hlds

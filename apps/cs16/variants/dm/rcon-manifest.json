@@ -1,7 +1,7 @@
 {
   "displayName": "Counter-Strike 1.6 (Deathmatch)",
   "engine": "goldsrc",
-  "notes": "GoldSrc/HLDS. rcon rides UDP on the game port. maps are queried live from the running server. DM VARIANT: this build replaces Valve's cs.so with ReGameDLL_CS and adds Metamod + AMX Mod X, so it carries BOTH the amx_* command surface and ReGameDLL's deathmatch cvars. The DM cvars (mp_forcerespawn, mp_randomspawn, mp_respawn_immunitytime, mp_round_infinite) DO NOT EXIST on the vanilla cs16 service \u2014 verified by control test 2026-08-27 \u2014 so do not copy them there. There is deliberately no CSDM: CSDM 2.1.2 sigscans cs.so for 2008 byte patterns, every pattern misses on current HLDS, and it disables itself ('Sig line 110 failed'). mp_forcerespawn 0 silently turns this back into round-based CS. Map voting is mapchooser.amxx, drawn from mapcycle.txt.",
+  "notes": "GoldSrc/HLDS. rcon rides UDP on the game port. maps are queried live from the running server. DM VARIANT: this build replaces Valve's cs.so with ReGameDLL_CS and adds Metamod + AMX Mod X, so it carries BOTH the amx_* command surface and ReGameDLL's deathmatch cvars. The DM cvars (mp_forcerespawn, mp_randomspawn, mp_respawn_immunitytime, mp_round_infinite) DO NOT EXIST on the vanilla cs16 service \u2014 verified by control test 2026-08-27 \u2014 so do not copy them there. There is deliberately no CSDM: CSDM 2.1.2 sigscans cs.so for 2008 byte patterns, every pattern misses on current HLDS, and it disables itself ('Sig line 110 failed'). mp_forcerespawn 0 silently turns this back into round-based CS. Map voting is mapchooser.amxx, drawn from mapcycle.txt. BUNNYHOP is also native ReGameDLL (sv_autobunnyhopping, sv_enablebunnyhopping, mp_jump_height) \u2014 no bhop plugin is installed, and these cvars do not exist on vanilla cs16. STATS: statsx.amxx ('Stats Extended' \u2014 rank, K:D, HUD) is enabled with its CSX module and needs no addition. ReSemiclip was evaluated and REJECTED: it refuses to attach on this stack (Meta_Attach(): 0), almost certainly wanting ReHLDS (the engine) rather than just ReGameDLL (the game DLL).",
   "maps": "live",
   "commands": [
     {
@@ -274,6 +274,24 @@
       "description": "Buy time in minutes; -1 always allowed, 0 disables buying. Not yet exercised against a running cs16-dm.",
       "rcon": "mp_buytime {value}",
       "read": "mp_buytime"
+    },
+    {
+      "name": "bhop_auto",
+      "description": "Auto re-jump while the jump key is held. Pair with bhop_speed \u2014 auto alone gives hops that never build velocity. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "sv_autobunnyhopping {value}",
+      "read": "sv_autobunnyhopping"
+    },
+    {
+      "name": "bhop_speed",
+      "description": "Allow player speed to exceed the normal running cap \u2014 this is the actual bunnyhop. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "sv_enablebunnyhopping {value}",
+      "read": "sv_enablebunnyhopping"
+    },
+    {
+      "name": "jump_height",
+      "description": "Player jump height (ReGameDLL default 45). Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_jump_height {value}",
+      "read": "mp_jump_height"
     }
   ]
 }

@@ -79,6 +79,22 @@ RUN sed -i 's|^gamedll_linux .*|gamedll_linux "addons/metamod/dlls/metamod.so"|'
       /opt/steam/hlds/cstrike/liblist.gam \
  && grep -q 'addons/metamod/dlls/metamod.so' /opt/steam/hlds/cstrike/liblist.gam
 
+# Enable AMXX plugins the distribution ships but leaves commented out. All four have
+# their required module present in this image (Fun, CSX), so this is a config change,
+# not a download — and nothing third-party is added:
+#   miscstats      kill-streak / headshot / event announcements
+#   restmenu       weapon restriction menu
+#   telemenu       teleport menu (admin can move a player) - needs Fun, present
+#   stats_logging  per-weapon stats logging - needs CSX, present
+# statsx.amxx (rank/K:D/HUD, "Stats Extended") is already enabled upstream and its CSX
+# module ships, so it needs nothing here; verified loading 2026-08-28.
+RUN sed -i -E 's#^;(miscstats|restmenu|telemenu|stats_logging)\.amxx#\1.amxx#' \
+      /opt/steam/hlds/cstrike/addons/amxmodx/configs/plugins.ini \
+ && for p in miscstats restmenu telemenu stats_logging statsx; do \
+      grep -qE "^${p}\.amxx" /opt/steam/hlds/cstrike/addons/amxmodx/configs/plugins.ini \
+        || { echo "plugin ${p} not enabled"; exit 1; }; \
+    done
+
 COPY apps/cs16/variants/dm/respawn-init.sh /respawn-init.sh
 
 USER steam
