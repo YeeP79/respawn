@@ -26,24 +26,64 @@
 # flat tfc/maps/*.bsp and wads at tfc/ root — so selection is the thing to organise.
 #   conc    scout/medic concussion-jump tracks
 #   rocket  soldier rocket/grenade-jump tracks
-#   mixed   both, or multi-skill (DM arena + jump course)
-axlconc8b      conc    https://tfcma.s3.us-east-2.amazonaws.com/axlconc8b.zip
-concmap2       conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap2.zip
-concmap_cze    conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze.zip
-concmap_r      conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_r.zip
-concmap_tg     conc    https://tfcma.s3.us-east-2.amazonaws.com/concmap_tg.zip
-esad_newbconc  conc    https://tfcma.s3.us-east-2.amazonaws.com/esad_newbconc.zip
-k_concmap      conc    https://tfcma.s3.us-east-2.amazonaws.com/K_ConcMap.zip
-newb_conc      conc    https://tfcma.s3.us-east-2.amazonaws.com/newb_conc.zip
-skeeconc       conc    https://tfcma.s3.us-east-2.amazonaws.com/skeeconc.zip
-tayconc        conc    https://tfcma.s3.us-east-2.amazonaws.com/tayconc.zip
-58thv2         mixed   https://tfcma.s3.us-east-2.amazonaws.com/58THV2.zip
-jumperz        mixed   https://tfcma.s3.us-east-2.amazonaws.com/jumperz.zip
-phsyco_ward_r  mixed   https://tfcma.s3.us-east-2.amazonaws.com/phsyco_ward_r.zip
-training       mixed   https://tfcma.s3.us-east-2.amazonaws.com/training.zip
-mjump1         rocket  https://tfcma.s3.us-east-2.amazonaws.com/mjump1.zip
-pyrojump       rocket  https://tfcma.s3.us-east-2.amazonaws.com/pyrojump.zip
-quad_rocket    rocket  https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket.zip
-rjstarters     rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjstarters.zip
-rjump2         rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjump2.zip
-rjumptfc       rocket  https://tfcma.s3.us-east-2.amazonaws.com/rjumpTFC.zip
+#   mixed   both, or multi-skill (DM arena + jump course)#
+# COLUMNS: <name> <category> <source> <url>
+#
+# SOURCE records WHY a map earned its place. There is no rating system for TFC skill
+# maps, so this is the nearest thing to a bar — capture it when adding, or the next
+# person adds on vibes and the set quietly degrades:
+#
+#   favorite    named on tfcmaps.net's own Favorites list for the Skill game type
+#   rated-5     JMC's TFC Map Zone 5-star (only one map in the whole skill category)
+#   rated-4     JMC's TFC Map Zone 4-star (only one)
+#   community   recommended by name in community threads (usually as a good starter)
+#   catalogued  a substantive catalogue entry calling out difficulty or design
+#   sequel      direct sequel to a map already in this set with stronger provenance;
+#               no independent write-up of its own, so the parent is the evidence
+#
+# `favorite`, `rated-5` and `rated-4` are the strongest signals and feed the generated
+# favorites.txt cycle. `catalogued` is the weakest — fine for filling out a rotation,
+# not enough on its own for a short one.
+axlconc8b      conc    favorite    https://tfcma.s3.us-east-2.amazonaws.com/axlconc8b.zip
+concmap_r      conc    favorite    https://tfcma.s3.us-east-2.amazonaws.com/concmap_r.zip
+concjumptfc    conc    community   https://tfcma.s3.us-east-2.amazonaws.com/concjumptfc.zip
+concmap2       conc    community   https://tfcma.s3.us-east-2.amazonaws.com/concmap2.zip
+esad_newbconc  conc    community   https://tfcma.s3.us-east-2.amazonaws.com/esad_newbconc.zip
+newb_conc      conc    community   https://tfcma.s3.us-east-2.amazonaws.com/newb_conc.zip
+skeeconc       conc    community   https://tfcma.s3.us-east-2.amazonaws.com/skeeconc.zip
+tayconc        conc    community   https://tfcma.s3.us-east-2.amazonaws.com/tayconc.zip
+concheadz      conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concheadz.zip
+concheadz2     conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concheadz2.zip
+concmap3       conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap3.zip
+concmap4       conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap4.zip
+concmap5       conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap5.zip
+concmap9_r     conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap9_r.zip
+concmap_cze    conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze.zip
+concmap_cze_r  conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap_cze_r.zip
+concmap_ivy    conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap_ivy.zip
+concmap_rax    conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap_rax.zip
+concmap_tg     conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/concmap_tg.zip
+jumpstart      conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/jumpstart.zip
+k_concmap      conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/K_ConcMap.zip
+sconc          conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/Sconc.zip
+tayconc2       conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/tayconc2.zip
+tayconc3       conc    catalogued  https://tfcma.s3.us-east-2.amazonaws.com/tayconc3.zip
+58thv2         mixed   rated-5     https://tfcma.s3.us-east-2.amazonaws.com/58THV2.zip
+training       mixed   rated-4     https://tfcma.s3.us-east-2.amazonaws.com/training.zip
+jumperz        mixed   catalogued  https://tfcma.s3.us-east-2.amazonaws.com/jumperz.zip
+phsyco_ward_r  mixed   catalogued  https://tfcma.s3.us-east-2.amazonaws.com/phsyco_ward_r.zip
+pyrojump       rocket  favorite    https://tfcma.s3.us-east-2.amazonaws.com/pyrojump.zip
+quad_rocket    rocket  favorite    https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket.zip
+rjumptfc       rocket  favorite    https://tfcma.s3.us-east-2.amazonaws.com/rjumpTFC.zip
+k_soldier      rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/K_Soldier.zip
+mjump1         rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/mjump1.zip
+pipejump_ad    rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/pipejump_ad.zip
+pipejumpin     rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/pipejumpin.zip
+pipeworld2001  rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/pipeworld2001.zip
+rjensignee     rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/rjensignee.zip
+rjstarters     rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/rjstarters.zip
+rjump2         rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/rjump2.zip
+rocketjump     rocket  catalogued  https://tfcma.s3.us-east-2.amazonaws.com/rocketjump.zip
+quad_rocket2   rocket  sequel      https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket2.zip
+quad_rocket3   rocket  sequel      https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket3.zip
+quad_rocket4   rocket  sequel      https://tfcma.s3.us-east-2.amazonaws.com/quad_rocket4.zip

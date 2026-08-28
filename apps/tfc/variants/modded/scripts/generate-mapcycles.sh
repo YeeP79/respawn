@@ -19,7 +19,9 @@ mkdir -p "$out"
 # a skill server that drops back to 2fort between tracks is not a skill server.
 STOCK=(2fort)
 
-read_cat() { awk -v c="$1" '!/^#/ && NF==3 && $2==c {print $1}' "$manifest" | sort; }
+read_cat()  { awk -v c="$1" '!/^#/ && NF==4 && $2==c {print $1}' "$manifest" | sort; }
+# The strongest provenance tiers — see maps.txt for what each source value means.
+read_best() { awk '!/^#/ && NF==4 && ($3=="favorite" || $3=="rated-5" || $3=="rated-4") {print $1}' "$manifest" | sort; }
 
 conc=$(read_cat conc); rocket=$(read_cat rocket); mixed=$(read_cat mixed)
 [ -n "$conc$rocket$mixed" ] || { echo "no maps parsed from $manifest" >&2; exit 1; }
@@ -39,5 +41,9 @@ emit skill.txt  "Skill maps only - no stock maps."            $conc $rocket $mix
 emit conc.txt   "Concussion-jump tracks only (scout/medic)."  $conc
 emit rocket.txt "Rocket/grenade-jump tracks only (soldier)."  $rocket
 emit stock.txt  "Stock TFC only - the vanilla rotation."      ${STOCK[*]}
+# The short rotation: only maps with the strongest provenance. Deliberately small —
+# a 20-map cycle is a rotation, this is a "play the good ones" list.
+# shellcheck disable=SC2086
+emit favorites.txt "Best-evidenced only (favorite / rated-5 / rated-4)." $(read_best)
 
 echo "regenerated $(ls "$out" | wc -l) cycles from $(grep -vc '^#' "$manifest") manifest entries"
