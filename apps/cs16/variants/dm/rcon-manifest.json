@@ -1,0 +1,279 @@
+{
+  "displayName": "Counter-Strike 1.6 (Deathmatch)",
+  "engine": "goldsrc",
+  "notes": "GoldSrc/HLDS. rcon rides UDP on the game port. maps are queried live from the running server. DM VARIANT: this build replaces Valve's cs.so with ReGameDLL_CS and adds Metamod + AMX Mod X, so it carries BOTH the amx_* command surface and ReGameDLL's deathmatch cvars. The DM cvars (mp_forcerespawn, mp_randomspawn, mp_respawn_immunitytime, mp_round_infinite) DO NOT EXIST on the vanilla cs16 service \u2014 verified by control test 2026-08-27 \u2014 so do not copy them there. There is deliberately no CSDM: CSDM 2.1.2 sigscans cs.so for 2008 byte patterns, every pattern misses on current HLDS, and it disables itself ('Sig line 110 failed'). mp_forcerespawn 0 silently turns this back into round-based CS. Map voting is mapchooser.amxx, drawn from mapcycle.txt.",
+  "maps": "live",
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Switch to a different map immediately.",
+      "rcon": "changelevel {map}",
+      "args": {
+        "map": {
+          "description": "Map name, e.g. de_nuke (no .bsp)",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "restart_round",
+      "description": "Restart the current round after a delay in seconds.",
+      "rcon": "sv_restartround {seconds}",
+      "args": {
+        "seconds": {
+          "description": "Delay before restart",
+          "type": "int"
+        }
+      }
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name or userid (see server_status for ids).",
+      "rcon": "kick {player}",
+      "args": {
+        "player": {
+          "description": "Player name in quotes, or #userid"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "ban_player",
+      "description": "Ban a player by userid for N minutes (0 = permanent).",
+      "rcon": "banid {minutes} {userid} kick",
+      "args": {
+        "minutes": {
+          "description": "Ban length in minutes; 0 is permanent",
+          "type": "int"
+        },
+        "userid": {
+          "description": "Numeric userid from the players query"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone on the server.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast"
+        }
+      }
+    },
+    {
+      "name": "set_join_password",
+      "description": "Set or clear the password players need to join (empty clears it). Distinct from the rcon admin password.",
+      "rcon": "sv_password {password}",
+      "args": {
+        "password": {
+          "description": "Join password; empty string removes it"
+        }
+      }
+    },
+    {
+      "name": "amx_map",
+      "description": "Change level immediately via AMXX (bypasses any vote).",
+      "rcon": "amx_map {map}",
+      "args": {
+        "map": {
+          "description": "Map name without .bsp.",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "force_vote",
+      "description": "Open a next-map vote between the maps you name (1-4). Does NOT read mapcycle.txt \u2014 amx_votemap takes its choices as arguments and prints usage if given none.",
+      "rcon": "amx_votemap {maps}",
+      "args": {
+        "maps": {
+          "description": "One to four map names, space-separated, e.g. \"de_dust2 de_aztec\".",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "cancel_vote",
+      "description": "Cancel a vote currently running.",
+      "rcon": "amx_cancelvote",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "show_nextmap",
+      "description": "Report the map queued next in the cycle.",
+      "rcon": "amx_nextmap",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "time_left",
+      "description": "Report time remaining on the current map.",
+      "rcon": "amx_timeleft",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "extend_map",
+      "description": "Add minutes to the current map's time limit.",
+      "rcon": "amx_extendmap {minutes}",
+      "args": {
+        "minutes": {
+          "description": "Minutes to add.",
+          "type": "int"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "amx_say",
+      "description": "Broadcast a message through AMXX.",
+      "rcon": "amx_say {message}",
+      "args": {
+        "message": {
+          "description": "Text to broadcast.",
+          "type": "string"
+        }
+      },
+      "unverified": true
+    },
+    {
+      "name": "list_plugins",
+      "description": "List loaded AMXX plugins and whether each is running.",
+      "rcon": "amx_plugins",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "list_modules",
+      "description": "List loaded AMXX modules.",
+      "rcon": "amx_modules",
+      "args": {},
+      "unverified": true
+    },
+    {
+      "name": "meta_list",
+      "description": "List Metamod plugins \u2014 confirms AMXX was chain-loaded.",
+      "rcon": "meta list",
+      "args": {},
+      "unverified": true
+    }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Who is connected: userid, name and steamid for each player, plus the current map. Use the userid with kick_player / ban_player.",
+      "rcon": "status",
+      "singles": {
+        "hostname": "^hostname\\s*:\\s*(.+)$",
+        "map": "^map\\s*:\\s*(\\S+)",
+        "playerCount": "^players\\s*:\\s*(.+)$"
+      },
+      "row": {
+        "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|VALVE_\\S+)?",
+        "fields": [
+          "userid",
+          "name",
+          "steamid"
+        ],
+        "skipIf": "^#\\s*userid"
+      }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "mp_friendlyfire",
+      "description": "Whether players can damage teammates.",
+      "default": "0",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "mp_timelimit",
+      "description": "Minutes per map before it changes.",
+      "default": "0",
+      "range": [
+        0,
+        120
+      ]
+    },
+    {
+      "name": "mp_roundtime",
+      "description": "Round length in minutes.",
+      "default": "5",
+      "range": [
+        1,
+        9
+      ]
+    },
+    {
+      "name": "mp_startmoney",
+      "description": "Money each player starts a match with.",
+      "default": "800",
+      "range": [
+        800,
+        16000
+      ]
+    },
+    {
+      "name": "sv_gravity",
+      "description": "World gravity; 800 is default, lower is floatier.",
+      "default": "800",
+      "range": [
+        100,
+        2000
+      ]
+    },
+    {
+      "name": "mp_autoteambalance",
+      "description": "Auto-balance team sizes between rounds.",
+      "default": "1",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "dm_respawn_delay",
+      "description": "Seconds before a killed player respawns. 0 DISABLES deathmatch and reverts to round-based CS. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_forcerespawn {value}",
+      "read": "mp_forcerespawn"
+    },
+    {
+      "name": "dm_random_spawn",
+      "description": "Random spawn points instead of team spawns (needs the map's .nav file). ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_randomspawn {value}",
+      "read": "mp_randomspawn"
+    },
+    {
+      "name": "dm_spawn_immunity",
+      "description": "Seconds of spawn protection after respawn. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_respawn_immunitytime {value}",
+      "read": "mp_respawn_immunitytime"
+    },
+    {
+      "name": "dm_round_infinite",
+      "description": "Block round-end checks so play is continuous rather than very short rounds. ReGameDLL only. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_round_infinite {value}",
+      "read": "mp_round_infinite"
+    },
+    {
+      "name": "dm_infinite_ammo",
+      "description": "0 off, 1 infinite clip, 2 infinite backpack ammo. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_infinite_ammo {value}",
+      "read": "mp_infinite_ammo"
+    },
+    {
+      "name": "dm_buytime",
+      "description": "Buy time in minutes; -1 always allowed, 0 disables buying. Not yet exercised against a running cs16-dm.",
+      "rcon": "mp_buytime {value}",
+      "read": "mp_buytime"
+    }
+  ]
+}

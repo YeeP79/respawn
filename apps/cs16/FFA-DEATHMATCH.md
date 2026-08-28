@@ -1,9 +1,75 @@
-# cs16 FFA Deathmatch — modding attempt (not shipped)
+# cs16 FFA Deathmatch — SHIPPED as `cs16-dm` (2026-08-27)
+
+> # ✅ SHIPPED — and CSDM is not how. Read this before anything below.
+>
+> Deathmatch now exists as the **`cs16-dm`** variant (`apps/cs16/variants/dm/`).
+> Vanilla `cs16` is untouched. Two things in the rest of this document are now known
+> to be wrong, and both were measured, not reasoned about:
+>
+> ## 1. CSDM 2.1.2 does not work, and no version of AMX Mod X fixes it
+>
+> Built and run against this exact base (`jives/hlds:cstrike`) with AMXX 1.10:
+>
+> ```
+> [CSDM2] ERROR: Sig line 110 (csdm_util.cpp) failed, contact author!
+> [CSDM2] CSDM failed to load, contact author...
+> [AMXX] "csdm_main.amxx" failed to load: unknown function (name "csdm_respawn")
+> ```
+>
+> The module *loads* fine — this is not an ABI or AMXX-version problem. CSDM 2.1.2
+> (Oct 2008) **sigscans `cs.so` for hardcoded byte patterns** to hook game functions.
+> Valve has rebuilt that binary since, every pattern misses, CSDM disables itself, and
+> all nine `csdm_*.amxx` plugins then fail with "unknown function". Nothing downstream
+> of that is recoverable by configuration. The component table below listing
+> **CSDM 2.1.2** and **AMX Mod X 1.8.2** should not be followed.
+>
+> ## 2. AMX Mod X 1.8.2 segfaults modern HLDS
+>
+> The 1.8.2 build is from Feb 2013; HLDS is now an Oct 2024 build (10211). It crashes
+> a few seconds after AMXX finishes loading, restarting every ~12s. The symptom is
+> **not** an obvious crash — it presents as *"the map keeps reverting to the boot
+> map"*, because each restart re-boots the `+map` argument. Measured on the sibling
+> TFC build the same night, where it cost an hour of misdiagnosis.
+> Use **1.10.0.5479** (note: 1.10.0 is a GitHub *pre-release*, so it is NOT what the
+> API reports as "latest" — that is still 1.9.0.5303).
+>
+> ## What shipped instead: ReGameDLL, and NO deathmatch plugin
+>
+> [`ReGameDLL_CS`](https://github.com/rehlds/ReGameDLL_CS) is a maintained
+> reverse-engineered replacement for `cstrike/dlls/cs.so` (MIT, release 5.30.0.814,
+> 2026-05-18). It is the **game DLL, not the engine** — despite the `Re` prefix it
+> needs no ReHLDS and runs on stock HLDS. Verified:
+>
+> ```
+> ReGameDLL version: 5.30.0.814-dev
+> [META] Game DLL for 'Counter-Strike' loaded successfully
+> AMX Mod X version 1.10.0.5479     Started map "de_dust2"     Segfaults: 0
+> ```
+>
+> It provides deathmatch as **native cvars**, so `cs16-dm` ships no DM plugin at all.
+> Controlled against the stock image — these do not exist on Valve's `cs.so`:
+>
+> | cvar | ReGameDLL | stock |
+> |------|-----------|-------|
+> | `mp_forcerespawn` (auto-respawn, value = delay) | present | **absent** |
+> | `mp_randomspawn` (random spawns; needs map `.nav`) | present | **absent** |
+> | `mp_respawn_immunitytime` (spawn protection) | present | **absent** |
+> | `mp_round_infinite` (block round-end checks) | present | **absent** |
+> | `mp_infinite_ammo` | present | present |
+>
+> That is CSDM's entire reason for existing, in a maintained gamedll, with no
+> sigscanning to rot. `mp_forcerespawn 0` silently reverts the server to round-based
+> CS — it is the one value that quietly undoes the variant.
+>
+> **Everything below is kept as the historical record of the earlier attempt.** The
+> Metamod filename finding in the next block is still correct and is still load-bearing.
+
+---
 
 This documents an attempt to build a **separate** free-for-all deathmatch image for
-cs16 (Metamod + AMX Mod X + CSDM), kept apart from the vanilla server. It is **not
-shipped** — it hit a base-image incompatibility. Written up so the next attempt
-starts from the conclusion, not from scratch.
+cs16 (Metamod + AMX Mod X + CSDM), kept apart from the vanilla server. It was **not
+shipped** — it hit what was read as a base-image incompatibility. Written up so the
+next attempt starts from the conclusion, not from scratch.
 
 > # 🛑 SOLVED — and the conclusion below is WRONG. Read this first.
 >
