@@ -8,9 +8,9 @@ executed. A spike closes exactly one of those, with evidence.
 
 | Spike | Question | Blocking | Needs | Status | Answer |
 |---|---|---|---|---|---|
-| [S1](S1.md) | Does the full mod stack build and load together? | **Yes — first** | docker | ⬜ Not started | — |
+| [S1](S1.md) | Does the full mod stack build and load together? | **Yes — first** | docker | ✅ Pass | **Yes.** MetaMod 2.0.0 + SourceMod 1.12 + Left4DHooks 1.168 + All4Dead2 + Stripper all load, zero errors, **+0.3 GB**. Two files ship broken for this game and must be removed. Entrypoint puts the rcon password in **argv** |
 | [S2](S2.md) | Can the MCP drive Source rcon, and do All4Dead2's commands work over it? | **Yes** | docker + rcon | ⬜ Not started | — |
-| [S3](S3.md) | Does srcds log the rcon password the way HLDS does? | Gates go-live | docker + rcon | ⬜ Not started | — |
+| [S3](S3.md) | Does srcds log the rcon password the way HLDS does — **and is it in argv?** | Gates go-live | docker + rcon | ⬜ Not started | *(widened by S1)* |
 | [S4](S4.md) | Do joining players need the custom campaign installed? | **Yes — decides the campaigns branch** | **a real client** | ⬜ Not started | — |
 | [S5](S5.md) | Is the slot machinery inert at four players? | Decides base membership | docker | ⬜ Not started | — |
 | [S6](S6.md) | What must the fifth player actually do to join? | Defines the big-coop ritual | **two players** | ⬜ Not started | — |
@@ -20,6 +20,10 @@ executed. A spike closes exactly one of those, with evidence.
 Status key: ⬜ Not started · 🟡 In progress · ✅ Pass · ❌ Fail · ⚠️ Partial
 
 ## Order
+
+**S1 is done (✅ 2026-08-28)** and unblocked S2, S3, S5 and S7. The build recipe
+is `lab/s1-modded-image/`; `lab/srcds-rcon.py` is the client the remaining
+server-side spikes use.
 
 **S1 first.** Every spike except S8 needs a modded server to exist, and S1 is the
 one that finds out whether the base template is even real.
