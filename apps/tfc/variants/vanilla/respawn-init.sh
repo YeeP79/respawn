@@ -40,4 +40,8 @@ echo "Respawn: wrote ${CFG} (hostname=${SERVERNAME}, rcon ${rcon_state})"
 
 # Hand off to the upstream hlds entrypoint, preserving CONTAINER_COMMAND args.
 cd /opt/steam/hlds
-exec /bin/sh ./entrypoint.sh "$@"
+# Through the redactor, NOT straight to the entrypoint: HLDS echoes every rcon
+# request to stdout with the password in it, and stdout is the CloudWatch stream.
+# See apps/_shared/hlds-log-redact.sh — it keeps the game as this container's
+# direct child so its exit status and signal handling are unchanged.
+exec /bin/sh /hlds-log-redact.sh /bin/sh ./entrypoint.sh "$@"

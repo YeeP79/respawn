@@ -182,6 +182,46 @@ load. The heuristic matches `PASSWORD`/`TOKEN`/`PWD`/`GSLT` but deliberately not
 `RUST_RCON_PORT` still loads. If the image takes config only on the command line, add a
 `respawn-init.sh` shim (see `apps/cs16`, `apps/tfc`).
 
+### GoldSrc logs the rcon password; the shim must filter stdout
+
+HLDS echoes every rcon request to the console verbatim, password included, in two
+shapes:
+
+```
+rcon 711248148 "<password>" sv_airaccelerate
+L 08/28/2026 - 22:59:08: Rcon: "rcon 711248148 "<password>" sv_airaccelerate
+```
+
+Container stdout is the CloudWatch stream, so every command the rcon-control sidecar
+issues wrote the credential into the log group — which defeats `SECRET_REFS`, whose
+whole point is keeping secrets out of anything readable with ordinary infrastructure
+access. There is no cvar to disable it, and rotating does not help: the next call logs
+the new value.
+
+Every goldsrc shim therefore hands off through `apps/_shared/hlds-log-redact.sh`
+instead of `exec`ing the upstream entrypoint directly:
+
+```sh
+exec /bin/sh /hlds-log-redact.sh /bin/sh ./entrypoint.sh "$@"
+```
+
+It redacts rather than suppresses, because the line is also the only audit trail of
+rcon use (a stranger's failed guess logs the same shape as `Bad Rcon:`). Two things it
+is careful about, both measured rather than assumed:
+
+- **It does not use `exec hlds | sed`.** That makes the shell PID 1 and hands the
+  container sed's exit status, and `server_health` reads that status to tell a normal
+  stop (`SIGKILL after ECS asked it to stop`) from an OOM kill.
+- **`set -e` must be off around its `wait`.** `wait` reports the *game's* exit status,
+  so a server exiting non-zero — a crash, or the SIGKILL ending every normal stop —
+  terminates the wrapper on the spot and the container is torn down before the filter
+  drains. Measured with errexit on: a server exiting 42 delivered its log 1 run in 5,
+  and the faster it died the less survived, which is backwards.
+
+A new goldsrc service needs both halves: `COPY apps/_shared/hlds-log-redact.sh` in the
+Dockerfile, and the handoff line above in the shim. Verify with a real rcon call —
+grep the container log for the password and expect zero hits.
+
 ### Every `SECRET_REFS` entry must exist before the first deploy
 
 ECS resolves secrets *before* starting the container, and CDK only synthesizes an ARN —

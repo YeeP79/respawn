@@ -130,6 +130,7 @@ RUN sed -i 's#^kz_map_downloader\.amxx#; kz_map_downloader.amxx  ; needs AmxxArc
  && grep -q '^kz_core\.amxx' /opt/steam/hlds/cstrike/addons/amxmodx/configs/plugins-kz.ini \
  && test -f /opt/steam/hlds/cstrike/addons/amxmodx/plugins/kz_core.amxx
 
+COPY apps/_shared/hlds-log-redact.sh /hlds-log-redact.sh
 COPY apps/cs16/variants/kz/respawn-init.sh /respawn-init.sh
 
 USER steam

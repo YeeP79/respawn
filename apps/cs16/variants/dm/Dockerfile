@@ -95,6 +95,7 @@ RUN sed -i -E 's#^;(miscstats|restmenu|telemenu|stats_logging)\.amxx#\1.amxx#' \
         || { echo "plugin ${p} not enabled"; exit 1; }; \
     done
 
+COPY apps/_shared/hlds-log-redact.sh /hlds-log-redact.sh
 COPY apps/cs16/variants/dm/respawn-init.sh /respawn-init.sh
 
 USER steam

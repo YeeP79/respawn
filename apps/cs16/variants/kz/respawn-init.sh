@@ -138,4 +138,8 @@ echo "Respawn: mapcycle ${MAPCYCLE} ($(grep -vc '^//' "${CYCLE_FILE}") maps); fa
 echo "Respawn: kz sql ${sql_state}"
 
 cd /opt/steam/hlds
-exec /bin/sh ./entrypoint.sh "$@"
+# Through the redactor, NOT straight to the entrypoint: HLDS echoes every rcon
+# request to stdout with the password in it, and stdout is the CloudWatch stream.
+# See apps/_shared/hlds-log-redact.sh — it keeps the game as this container's
+# direct child so its exit status and signal handling are unchanged.
+exec /bin/sh /hlds-log-redact.sh /bin/sh ./entrypoint.sh "$@"

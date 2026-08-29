@@ -90,6 +90,7 @@ COPY --chown=steam:steam apps/tfc/variants/modded/content/tfc/ /opt/steam/hlds/t
 # is active is GAME_ENV_MAPCYCLE, an env change rather than a rebuild.
 COPY --chown=steam:steam apps/tfc/variants/modded/mapcycles/ /opt/steam/hlds/tfc/mapcycles/
 
+COPY apps/_shared/hlds-log-redact.sh /hlds-log-redact.sh
 COPY apps/tfc/variants/modded/respawn-init.sh /respawn-init.sh
 
 USER steam

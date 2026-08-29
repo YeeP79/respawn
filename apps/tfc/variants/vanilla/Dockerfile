@@ -18,6 +18,7 @@ RUN for d in /temp/mods /temp/config; do \
     done
 USER steam
 
-COPY apps/tfc/respawn-init.sh /respawn-init.sh
+COPY apps/_shared/hlds-log-redact.sh /hlds-log-redact.sh
+COPY apps/tfc/variants/vanilla/respawn-init.sh /respawn-init.sh
 
 ENTRYPOINT ["/bin/sh", "/respawn-init.sh"]
