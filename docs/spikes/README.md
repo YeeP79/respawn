@@ -12,17 +12,23 @@ executed. A spike closes exactly one of those, with evidence.
 | [S2](S2.md) | Can the MCP drive Source rcon, and do All4Dead2's commands work over it? | **Yes** | docker + rcon | ✅ Pass | **Yes — no admins.cfg needed**, rcon runs as `Console<0>`. Control: a direct cheat-cvar set is refused, the plugin's is not. **12 commands, not 13**; 5 of them need a client present (bots count) |
 | [S3](S3.md) | Does srcds log the rcon password the way HLDS does — **and is it in argv?** | Gates go-live | docker + rcon | ⚠️ Partial | **Logs: no** — Source records `rcon from <ip>: command <cmd>`, never the credential, so **no redactor needed**. **argv: yes** — the entrypoint exposes it; avoidable via `server.cfg` + a shim |
 | [S4](S4.md) | Do joining players need the custom campaign installed? | **Yes — decides the campaigns branch** | **a real client** | ⬜ Not started | — |
-| [S5](S5.md) | Is the slot machinery inert at four players? | Decides base membership | docker | ⬜ Not started | — |
+| [S5](S5.md) | Is the slot machinery inert at four players? | Decides base membership | docker | ✅ Pass | **Yes** — identical to base at defaults, and `sv_maxplayers` resizes a running server live. Must use the **`oldlinux`** build; the plain one fails on glibc and leaves a server with no slot support |
 | [S6](S6.md) | What must the fifth player actually do to join? | Defines the big-coop ritual | **two players** | ⬜ Not started | — |
-| [S7](S7.md) | What does the modded image weigh, and how much ephemeral storage does it need? | **Yes — gates the CDK change** | docker | ⬜ Not started | — |
+| [S7](S7.md) | What does the modded image weigh, and how much ephemeral storage does it need? | ~~gates the CDK change~~ | docker | ✅ Pass | **~10.4 GB, not 15.6** — `docker images` reports 50% high. Fargate's default leaves **10 GiB headroom**, so `ephemeralStorage` is **not a blocker**. Mods add 221 MB |
 | [S8](S8.md) | Does ECR duplicate the base layers across repositories? | No — informs branch-vs-knob | AWS read | ✅ Pass | **Yes today** — `BLOB_MOUNTING` is DISABLED, so 1.30 GB is duplicated. **But the whole registry costs ~19c/month**, so cost is not an argument either way. One setting fixes it |
 
 Status key: ⬜ Not started · 🟡 In progress · ✅ Pass · ❌ Fail · ⚠️ Partial
 
 ## Order
 
-**S1 and S2 are done (✅ 2026-08-28).** S1 unblocked S2, S3, S5 and S7;
-S2 confirmed the MCP surface is real, so All4Dead2 stays in the base. The build recipe
+**S1, S2, S3, S5, S7 and S8 are done (✅ 2026-08-28).** Everything that can be
+answered without a game client is answered. **S4 and S6 are all that remain**,
+and both need a human with L4D2 open.
+
+Two of the six overturned something: S7 found the image is 10.4 GB rather than
+15.6, which removed the ephemeral-storage blocker entirely; S8 found registry
+duplication is real but costs pennies, which retired the cost argument for
+preferring knobs over branches. The build recipe
 is `lab/s1-modded-image/`; `lab/srcds-rcon.py` is the client the remaining
 server-side spikes use.
 
