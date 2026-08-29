@@ -382,6 +382,83 @@ function validateNoPlaintextSecrets(config: GameServerConfig): void {
   }
 }
 
+/**
+ * What each optional sidecar reserves, mirroring the `cpu` / `memoryLimitMiB` its
+ * construct passes to `addContainer`. Kept here so the check below can run at config
+ * load, long before any CDK code is reachable — the cost being that these numbers are
+ * a copy, and moving one in a construct means moving it here too.
+ */
+const SIDECAR_RESERVATIONS = {
+  idleShutdown: { cpu: 64, memory: 128 },
+  rconControl: { cpu: 32, memory: 128 },
+  redis: { cpu: 64, memory: 128 },
+  mysql: { cpu: 128, memory: 512 },
+  mysqlBackup: { cpu: 64, memory: 128 },
+} as const;
+
+/**
+ * Rejects a CPU/memory pair the enabled sidecars cannot fit inside.
+ *
+ * ECS requires the sum of the containers' reservations to be no greater than the
+ * task's, and the game container deliberately reserves nothing so it can use the
+ * remainder. Four sidecars claim 288 CPU / 896 MiB between them, which does not fit a
+ * CPU=256 task at all — and CDK's own rejection ("The sum of all container cpu values
+ * cannot be greater than the value of the task cpu") arrives at synth naming a
+ * construct path rather than a service, so it reads like a bug in the stack instead of
+ * a number in a .env.
+ *
+ * Memory is checked more strictly than CPU because the two behave differently:
+ * `memoryLimitMiB` is a hard limit, so what the sidecars claim is genuinely unavailable
+ * to the game server, while container `cpu` is a relative share that the game server
+ * bursts past whenever the sidecars are idle. Leaving the game 0 MiB would fit ECS's
+ * rule and still fail to run anything, so a minimum headroom is required.
+ */
+function validateSidecarBudget(config: GameServerConfig): void {
+  const active: Array<[string, { cpu: number; memory: number }]> = [];
+  if (config.idleShutdown.enabled)
+    active.push(['idle-shutdown', SIDECAR_RESERVATIONS.idleShutdown]);
+  if (config.rconControl.enabled)
+    active.push(['rcon-control', SIDECAR_RESERVATIONS.rconControl]);
+  if (config.redis.enabled) active.push(['redis', SIDECAR_RESERVATIONS.redis]);
+  if (config.mysql.enabled) {
+    active.push(['mysql', SIDECAR_RESERVATIONS.mysql]);
+    // The backup container only exists when a dump target is configured.
+    if (config.mysql.backupS3Uri)
+      active.push(['mysql-backup', SIDECAR_RESERVATIONS.mysqlBackup]);
+  }
+  if (active.length === 0) return;
+
+  const cpu = active.reduce((n, [, r]) => n + r.cpu, 0);
+  const memory = active.reduce((n, [, r]) => n + r.memory, 0);
+  const breakdown = active
+    .map(([name, r]) => `${name} ${r.cpu}/${r.memory} MiB`)
+    .join(', ');
+
+  if (cpu > config.container.cpu) {
+    throw new Error(
+      `Sidecars reserve ${cpu} CPU but CPU is ${config.container.cpu}. ` +
+        `Raise CPU to at least ${cpu} (and check the memory range that allows). ` +
+        `Enabled: ${breakdown}.`,
+    );
+  }
+
+  // 256 MiB is the floor the FLEET already runs at, not a guess: doom2, quakelive,
+  // cs16 and tfc-vanilla each leave exactly this much after their sidecars, and
+  // cs16-dm is verified live on 768. Picking anything higher would reject services
+  // that demonstrably work; the value exists to catch a task whose sidecars have eaten
+  // so much that the game server cannot start at all — which ECS itself permits, since
+  // its only rule is that the reservations fit.
+  const MIN_GAME_MEMORY_MIB = 256;
+  const free = config.container.memory - memory;
+  if (free < MIN_GAME_MEMORY_MIB) {
+    throw new Error(
+      `Sidecars hard-limit ${memory} MiB of MEMORY ${config.container.memory}, leaving ` +
+        `${free} MiB for the game server (needs at least ${MIN_GAME_MEMORY_MIB}). ` +
+        `Raise MEMORY to at least ${memory + MIN_GAME_MEMORY_MIB}. Enabled: ${breakdown}.`,
+    );
+  }
+}
+
 function validate(config: GameServerConfig): void {
   validateNoPlaintextSecrets(config);
 
@@ -397,6 +474,8 @@ function validate(config: GameServerConfig): void {
       `Invalid memory ${config.container.memory} MiB for CPU ${config.container.cpu}. Must be between ${minMem} and ${maxMem} MiB.`,
     );
   }
+
+  validateSidecarBudget(config);
 
   if (
     config.networking.containerPort < 1 ||

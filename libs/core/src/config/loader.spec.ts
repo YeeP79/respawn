@@ -933,4 +933,92 @@ describe('loadConfig', () => {
       expect(config.aws.accountId).toBeUndefined();
     });
   });
+
+  describe('sidecar CPU/memory budget', () => {
+    // ECS requires the containers' reservations to fit inside the task's. The game
+    // container reserves nothing and takes the remainder, so every one of these is a
+    // .env mistake that would otherwise surface as a CDK ValidationError at synth,
+    // naming a construct path rather than a service.
+    const MYSQL_FULL = [
+      'ENABLE_MYSQL_SIDECAR=true',
+      'MYSQL_BACKUP_S3_URI=s3://bucket/svc/db.sql.gz',
+      'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+      'ENABLE_RCON_CONTROL=true',
+    ];
+
+    it('rejects CPU too small for the enabled sidecars', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-cpu');
+      // idle 64 + rcon 32 + mysql 128 + backup 64 = 288 > 256
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=256', 'MEMORY=2048', ...MYSQL_FULL].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).toThrow(/reserve 288 CPU but CPU is 256/);
+    });
+
+    it('names the shortfall and the enabled sidecars', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-cpu-msg');
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=256', 'MEMORY=2048', ...MYSQL_FULL].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).toThrow(/mysql-backup 64\/128 MiB/);
+    });
+
+    it('rejects memory that leaves the game server under the floor', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-mem');
+      // Sidecars hard-limit 896 MiB; 1024 leaves 128, below the 256 floor.
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=512', 'MEMORY=1024', ...MYSQL_FULL].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).toThrow(
+        /hard-limit 896 MiB of MEMORY 1024, leaving 128 MiB/,
+      );
+    });
+
+    it('recommends a MEMORY that would actually pass', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-mem-hint');
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=512', 'MEMORY=1024', ...MYSQL_FULL].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).toThrow(/Raise MEMORY to at least 1152/);
+    });
+
+    it('accepts the cs16-kz shape', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-ok');
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=512', 'MEMORY=2048', ...MYSQL_FULL].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+
+    it('accepts the fleet floor of 256 MiB free', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-floor');
+      // idle 128 + rcon 128 = 256 of 512, leaving exactly the floor. This is doom2,
+      // quakelive, cs16 and tfc-vanilla — rejecting it would break working services.
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'CPU=256',
+        'MEMORY=512',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+        'ENABLE_RCON_CONTROL=true',
+      ].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+
+    it('does not count the backup container when no dump target is set', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-nobackup');
+      // Without MYSQL_BACKUP_S3_URI: idle 64 + mysql 128 = 192, which fits 256.
+      writeEnvFile(dir, [
+        'SERVICE_NAME=x',
+        'CPU=256',
+        'MEMORY=1024',
+        'ENABLE_MYSQL_SIDECAR=true',
+      ].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+
+    it('ignores the budget when every sidecar is off', () => {
+      const dir = path.join(FIXTURES_DIR, 'sc-none');
+      writeEnvFile(dir, ['SERVICE_NAME=x', 'CPU=256', 'MEMORY=512', 'ENABLE_IDLE_SHUTDOWN=false'].join('\n'));
+
+      expect(() => loadConfig(dir, 'dev')).not.toThrow();
+    });
+  });
+
 });
