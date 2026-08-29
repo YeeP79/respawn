@@ -61,7 +61,20 @@ TIMELIMIT="${TIMELIMIT:-45}"
   echo "sv_allowupload 1"
   if [ -n "${FASTDL_URL}" ]; then echo "sv_downloadurl \"${FASTDL_URL}\""; fi
   echo "// --- KZ movement ---"
+  # sv_airaccelerate is NOT owned by the server here: the suite's uq_jumpstats plugin
+  # drives it from kz_uq_airaccelerate and keeps re-asserting that value, so setting
+  # only the engine cvar is silently undone a moment later. Measured on the live
+  # server: `rcon sv_airaccelerate 100` reads back as 10 within a second, while
+  # setting kz_uq_airaccelerate moves sv_airaccelerate to match.
+  #
+  # Its own config never loads (the boot log carries "couldn't exec
+  # addons/amxmodx/configs/uq_jumpstats/config.cfg" — the directory is not shipped),
+  # so without this line the plugin falls back to its built-in default of 10, which is
+  # stock CS and makes most of these maps impossible. Both are written: the engine
+  # cvar so the value is right before any plugin loads, and the plugin cvar so it
+  # stays right afterwards.
   echo "sv_airaccelerate ${AIRACCELERATE}"
+  echo "kz_uq_airaccelerate ${AIRACCELERATE}"
   echo "sv_gravity ${GRAVITY}"
   echo "sv_maxspeed ${MAXSPEED}"
   echo "// --- stop CS structuring the session into rounds ---"

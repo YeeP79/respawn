@@ -1,7 +1,7 @@
 {
   "displayName": "Counter-Strike 1.6 (KZ Climbing)",
   "engine": "goldsrc",
-  "notes": "KZ (Kreedz climbing) build: players race timed obstacle courses, so this server deliberately turns OFF everything CS does to structure a round \u2014 no forced respawn, no freezetime, no buying, no team balance, mp_round_infinite 1. Do NOT copy the DM cvars from cs16-dm here; they fight the mode. Stack is Metamod + AMX Mod X 1.10 + ReGameDLL + ReAPI + AmxxEasyHttp (the last two verified loading 2026-08-28; ReAPI needs ReGameDLL only, NOT ReHLDS). Maps are 39 kreedz.com maps carrying that site's own difficulty tier, and mapcycles/ is generated from maps.txt ordered easiest-first; GAME_ENV_MAPCYCLE picks one (all | starter | climb | bhop | hard | tier-*), an env change rather than a rebuild. NO TIMER PLUGIN IS INSTALLED YET: without one the maps are climbable but nothing measures a run, which is the point of the genre \u2014 the dependencies for Theggv/Kreedz are in place but the plugin is not built. FastDL is required in practice: 224 MB against HLDS's 8 kB/s cap means a joiner without it times out.",
+  "notes": "KZ (Kreedz climbing) build: players race timed obstacle courses, so this server deliberately turns OFF everything CS does to structure a round \u2014 no forced respawn, no freezetime, no buying, no team balance, mp_round_infinite 1. Do NOT copy the DM cvars from cs16-dm here; they fight the mode. Stack is Metamod 1.21.1-am + AMX Mod X 1.10.0.5479 + ReGameDLL + ReAPI + AmxxEasyHttp (ReAPI needs ReGameDLL only, NOT ReHLDS). THE TIMER IS INSTALLED: the Theggv/Kreedz suite is compiled from a pinned SHA during the image build, which fails rather than ship a half-built suite. Verified against the deployed server 2026-08-28 \u2014 67 plugins on disk and zero setting themselves as failed. IT REQUIRES THE DATABASE, and not merely to persist: kz_core calls natives from kz_sql_core, so the MySQL sidecar is load-bearing for the timer itself. On a good boot it builds 19 tables in `kreedz`. Two ways that silently breaks, both fixed in the constructs and both worth recognising if they return \u2014 the game server must wait for the database to be HEALTHY (an AMXX plugin reads the database once, at plugin_cfg, and a plugin that cannot connect there marks itself failed for the life of the task), and the root account must exist for TCP (MARIADB_ROOT_HOST must be 127.0.0.1; 'localhost' matches only a socket login, and the resulting 'Access denied \u2026 (using password: YES)' reads as a wrong password rather than a missing account). In both cases the server looks perfectly healthy while the timer is gone. sv_airaccelerate IS NOT SERVER-OWNED HERE: the suite's uq_jumpstats plugin drives it from kz_uq_airaccelerate and re-asserts that value, so an rcon `sv_airaccelerate 100` reads back as 10 within a second. Set kz_uq_airaccelerate instead \u2014 the shim writes both. The plugin's own config is not shipped (the boot log says \"couldn't exec addons/amxmodx/configs/uq_jumpstats/config.cfg\"), so it otherwise falls back to 10, which is stock CS and makes most of these maps impossible. kz_invis is DEGRADED and expected to be: it hooks SV_StartSound, which needs ReHLDS, so its plugin_init throws a RegisterHookChain runtime error on every map load. The plugin still loads and nothing else is affected \u2014 same ReHLDS trap as ReSemiclip. Maps are 39 kreedz.com maps carrying that site's own difficulty tier, and mapcycles/ is generated from maps.txt ordered easiest-first; GAME_ENV_MAPCYCLE picks one (all | starter | climb | bhop | hard | tier-*), an env change rather than a rebuild. FastDL is required in practice: 224 MB against HLDS's 8 kB/s cap means a joiner without it times out.",
   "maps": [
     "kz_bhopwarehouse",
     "nfs_longjumpez",
@@ -236,8 +236,8 @@
     },
     {
       "name": "mp_timelimit",
-      "description": "Minutes per map before it changes.",
-      "default": "0",
+      "description": "Minutes per map before it changes. MUST NOT BE 0 here: AMXX then reads timeleft as 00:00 and the map vote never opens. GAME_ENV_TIMELIMIT sets it.",
+      "default": "45",
       "range": [
         0,
         120
@@ -290,8 +290,8 @@
     },
     {
       "name": "airaccelerate",
-      "description": "Mid-air steering \u2014 THE KZ cvar; every jump technique depends on it. 100 is the standard the maps and their published records assume. Stock CS is 10, on which most KZ maps are impossible.",
-      "rcon": "sv_airaccelerate {value}",
+      "description": "Mid-air steering \u2014 THE KZ cvar; every jump technique depends on it. 100 is the standard the maps and their published records assume; stock CS is 10, on which most KZ maps are impossible. Written to kz_uq_airaccelerate, NOT sv_airaccelerate: uq_jumpstats owns the engine cvar and overwrites a direct set within a second. Read back from sv_airaccelerate, which the plugin keeps in step.",
+      "rcon": "kz_uq_airaccelerate {value}",
       "read": "sv_airaccelerate"
     },
     {
