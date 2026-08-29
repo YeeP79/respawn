@@ -204,13 +204,29 @@ export class GameServerFargateService extends Construct {
             `entry that holds it.`,
         );
       }
-      new MysqlSidecar(this, 'Mysql', {
+      const mysql = new MysqlSidecar(this, 'Mysql', {
         taskDefinition,
         logGroup: logging.logGroup,
         database: config.mysql.database,
         rootPassword: rootSecret,
         ...(config.mysql.backupS3Uri ? { backupS3Uri: config.mysql.backupS3Uri } : {}),
         backupIntervalSeconds: config.mysql.backupIntervalSeconds,
+      });
+
+      // Hold the game server until the database accepts connections. HLDS boots faster
+      // than MariaDB initialises, and the plugins that need the database read it ONCE,
+      // at plugin_cfg on map load: an AMXX plugin that cannot connect there calls
+      // itself failed and is never retried. So losing the race does not delay the
+      // timer, it disables it for the life of the task — and the server still looks
+      // healthy, because the game itself runs fine. Measured on the first cs16-kz
+      // deploy: kz_sql_core and settings_mysql both died on "Can't connect to MySQL
+      // server on '127.0.0.1' (111)" one second before mariadbd finished starting.
+      //
+      // The sidecar's health check existed for this, but only the backup container
+      // consumed it, so the game container started immediately regardless.
+      container.addContainerDependencies({
+        container: mysql.container,
+        condition: ecs.ContainerDependencyCondition.HEALTHY,
       });
     }
 

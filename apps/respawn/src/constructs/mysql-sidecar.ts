@@ -50,11 +50,27 @@ export class MysqlSidecar extends Construct {
       essential: false,
       cpu: 128,
       memoryLimitMiB: 512,
+      // --skip-name-resolve makes account matching deterministic: without it MariaDB
+      // reverse-resolves the peer address, so whether a loopback client matches
+      // root@'127.0.0.1' or root@'localhost' depends on the resolver rather than on
+      // anything declared here. With it, a TCP client always matches by IP.
+      command: ['--skip-name-resolve'],
       environment: {
         MARIADB_DATABASE: props.database,
-        // The game connects over loopback inside the task, which no other container or
-        // host can reach, so a root login is not exposed beyond this boundary.
-        MARIADB_ROOT_HOST: 'localhost',
+        // 127.0.0.1, NOT 'localhost'. The entrypoint creates root@localhost plus
+        // root@<this>, and 'localhost' only ever matches a UNIX-socket login — so
+        // setting it to localhost creates no TCP-capable root account at all. Every
+        // client here (the game's AMXX MySQL module, the backup container) connects
+        // over TCP on the task's shared loopback and presents as root@'127.0.0.1',
+        // which then matches nothing: MariaDB answers "Access denied for user
+        // 'root'@'127.0.0.1' (using password: YES)", which reads as a wrong password
+        // and is really a missing account. Measured — the image creates its own
+        // healthcheck@127.0.0.1 for the same reason.
+        //
+        // This is still not a login exposed outside the task: 3306 is neither the
+        // primary port nor in ADDITIONAL_PORTS, so the security group grants it no
+        // ingress, and the task's loopback is shared only by its own containers.
+        MARIADB_ROOT_HOST: '127.0.0.1',
       },
       secrets: {
         MARIADB_ROOT_PASSWORD: props.rootPassword,
@@ -68,9 +84,15 @@ export class MysqlSidecar extends Construct {
         // The game server starts faster than MySQL does; without a health check the
         // plugin's first connection attempt races the database and fails silently.
         command: ['CMD', 'healthcheck.sh', '--connect'],
-        interval: Duration.seconds(10),
+        // 120s of grace before the container is called unhealthy: first-run schema
+        // creation builds 19 tables, and a restore replays a dump on top of that.
+        // Spent as 10 x 12s rather than 12 x 10s because ECS caps retries at 10 and
+        // rejects the task definition outright above it — CreateTaskDefinition fails
+        // with "Health check retries must be less than or equal to the maximum allowed
+        // value 10", which surfaces only at deploy, as a CloudFormation rollback.
+        interval: Duration.seconds(12),
         timeout: Duration.seconds(5),
-        retries: 12,
+        retries: 10,
         startPeriod: Duration.seconds(30),
       },
     });
