@@ -15,7 +15,7 @@ executed. A spike closes exactly one of those, with evidence.
 | [S5](S5.md) | Is the slot machinery inert at four players? | Decides base membership | docker | ⬜ Not started | — |
 | [S6](S6.md) | What must the fifth player actually do to join? | Defines the big-coop ritual | **two players** | ⬜ Not started | — |
 | [S7](S7.md) | What does the modded image weigh, and how much ephemeral storage does it need? | **Yes — gates the CDK change** | docker | ⬜ Not started | — |
-| [S8](S8.md) | Does ECR duplicate the base layers across repositories? | No — informs branch-vs-knob | AWS read | ⬜ Not started | — |
+| [S8](S8.md) | Does ECR duplicate the base layers across repositories? | No — informs branch-vs-knob | AWS read | ✅ Pass | **Yes today** — `BLOB_MOUNTING` is DISABLED, so 1.30 GB is duplicated. **But the whole registry costs ~19c/month**, so cost is not an argument either way. One setting fixes it |
 
 Status key: ⬜ Not started · 🟡 In progress · ✅ Pass · ❌ Fail · ⚠️ Partial
 
