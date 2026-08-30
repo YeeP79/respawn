@@ -76,6 +76,13 @@ a known-good floor, not as current.
 
 Versions marked **(read)** were read from the project's own repository.
 
-**Nothing here has been loaded together.** S1 proved the four platform pieces plus
-All4Dead2 and Stripper co-exist; everything else in these files is unexercised and
-wants an S1-shaped build test before it is believed.
+**The platform pins are exercised; most of the rest is second-hand.** S1 proved the four
+platform pieces plus All4Dead2 and Stripper co-exist. S11 then loaded the whole catalogued
+set — but on *the pack's* versions — and S15 re-ran it on the pins above: 49 plugins,
+13 of 13 extensions, no SourceMod error log at all.
+
+What that does **not** establish is the other ~40 entries' own versions. The payload for
+those is still the pack's assembled tree, because half of them are AlliedMods forum
+attachments with no stable download URL. So the platform underneath is ours and pinned;
+the plugins on top are a known-good floor somebody else assembled. Treat a version marked
+**(pack)** as the version that was measured, not as the version this file names.
