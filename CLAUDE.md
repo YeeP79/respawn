@@ -566,6 +566,27 @@ is not the same as known-clean — and `--assume-vanilla` is the operator assert
 `write_stamp` takes `modded` from whichever side carries it, so a later vanilla run
 cannot launder a modded save; it only appends to `history`.
 
+**Putting a world on a modded rung BRANCHES it; it does not move it.** Each variant's
+`worlds/` library is its own set of files, so publishing `IJT World` into
+`valheim-loot` left the copies in `valheim`, `valheim-admin` and `valheim-qol`
+untouched and vanilla — what became `modded` is the loot copy alone. That is the
+cheap part. The expensive part is that the two are now different worlds wearing one
+name, and they start out **byte-identical apart from the stamp**: same save-format
+version, same world clock, same size.
+
+So `list_worlds` compares **provenance** alongside version and clock, and a group whose
+copies disagree renders per copy rather than once. Without that, a fresh branch is
+invisible in precisely the window where it matters — the listing grouped by name, took
+its flavor from whichever library sorted first, and printed `[vanilla]` with
+`without mods: safe` over a copy that a vanilla load would shred. The stamp existed and
+was correct; the tool that reads it collapsed it away. `mods run:` is likewise the union
+across copies, and a plugin any copy calls world-altering stays flagged — a copy that
+never met the plugin is not evidence the plugin is harmless.
+
+A branch's local library copy is a **pre-branch snapshot** until you `pull_world`: the
+server's copy is the one carrying the new stamp. Pull after the first run, or the
+library keeps claiming the branch is vanilla.
+
 **A sidecar's memory limit must not be outgrown by the payload it moves.** `world-sync`
 ran at a hard 128 MiB, which is ample for a world save and was not ample for a large mod
 set: `aws s3 sync` over `valheim-overhaul`'s 527 MB of plugins was OOM-killed by the

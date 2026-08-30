@@ -1807,35 +1807,66 @@ server.registerTool(
     ];
     for (const [name, copies] of [...byName].sort(([a], [b]) => a.localeCompare(b))) {
       const first = copies[0]!;
-      const flavor = first.flavor ?? 'unstamped';
+      // Every distinct flavor present, not copies[0]'s. A branched world is genuinely
+      // both, and collapsing it to whichever library sorted first is how the listing
+      // came to describe a modded save as vanilla.
+      const flavor = [...new Set(copies.map((c) => c.flavor ?? 'unstamped'))].sort().join('|');
       const mb = (first.bytes / 1024 / 1024).toFixed(1);
       lines.push(
         `  ${name}`,
         `      ${inGameDays(first.netTime).toFixed(1)} in-game days   save v${first.version}   ${mb} MB   [${flavor}]`,
         `      in: ${copies.map((c) => c.service).join(', ')}`,
       );
-      if (first.mods.length > 0) {
-        // Annotated, because the bare list does not say which of them threaten a later
-        // vanilla load — and that is the only reason the list matters operationally.
-        const annotated = first.mods.map((m) => {
-          if (first.modsWorldSafe.includes(m)) return `${m} (world-safe)`;
-          if (first.modsWorldAltering.includes(m)) return `${m} (world-altering)`;
-          return m;
-        });
-        lines.push(`      mods run: ${annotated.join(', ')}`);
+      // Annotated, because the bare list does not say which of them threaten a later
+      // vanilla load — and that is the only reason the list matters operationally.
+      // Taken as the UNION across copies: each copy records only the plugins its own
+      // server ran, so reading one copy's list understates what has touched the world.
+      const annotate = (w: LibraryWorld, m: string): string => {
+        if (w.modsWorldSafe.includes(m)) return `${m} (world-safe)`;
+        if (w.modsWorldAltering.includes(m)) return `${m} (world-altering)`;
+        return m;
+      };
+      const seen = new Map<string, string>();
+      for (const c of copies) {
+        for (const m of c.mods) {
+          const label = annotate(c, m);
+          // A plugin flagged world-altering by any copy stays flagged: the assertion
+          // that matters is the unsafe one, and a copy that never met it says nothing.
+          if (!seen.has(m) || label.endsWith('(world-altering)')) seen.set(m, label);
+        }
       }
+      if (seen.size > 0) {
+        lines.push(`      mods run: ${[...seen.values()].join(', ')}`);
+      }
+      const diverged = divergence(copies);
       // Phrased as a consequence, not a capability: a modded save DOES load on a vanilla
       // server, it just deletes what the mods built. "Can it run" is the wrong question.
-      const outlook = unmoddedOutlook(first);
-      lines.push(`      without mods: ${outlook.verdict} — ${outlook.detail}`);
+      //
+      // Reported PER COPY once provenance differs, because one verdict taken from
+      // copies[0] is not merely incomplete there — it is wrong about every copy it does
+      // not describe, and wrong in the destructive direction for whichever half is
+      // modded. A branched world reads as "safe" from its vanilla masters while the
+      // branch it is warning you about would be shredded.
+      const flavorsDiffer = new Set(copies.map((c) => c.flavor ?? 'unstamped')).size > 1;
+      if (flavorsDiffer) {
+        for (const c of copies) {
+          const o = unmoddedOutlook(c);
+          lines.push(`      without mods, ${c.service}: ${o.verdict} — ${o.detail}`);
+        }
+      } else {
+        const outlook = unmoddedOutlook(first);
+        lines.push(`      without mods: ${outlook.verdict} — ${outlook.detail}`);
+      }
       for (const c of copies.filter((x) => !x.complete)) {
         lines.push(`      ! ${c.service}: .db with no .fwl — will not load`);
       }
-      const diverged = divergence(copies);
       if (diverged) {
         lines.push(`      ! COPIES DISAGREE on ${diverged}:`);
         for (const c of copies) {
-          lines.push(`          ${c.service}: save v${c.version}, ${inGameDays(c.netTime).toFixed(1)} days`);
+          lines.push(
+            `          ${c.service}: save v${c.version}, ${inGameDays(c.netTime).toFixed(1)} days, ` +
+              `${c.flavor ?? 'unstamped'}`,
+          );
         }
       }
       lines.push('');

@@ -111,6 +111,37 @@ describe('world library', () => {
       expect(divergence([copy('valheim', 35, 380746.24), copy('valheim-qol', 37, 500000)]))
         .toBe('save-format version and world clock');
     });
+
+    // The branch case, and the reason provenance is checked at all. Running a save on a
+    // modded rung stamps THAT copy `modded` for ever while its siblings stay `vanilla` —
+    // and it changes neither the version nor the clock, so version+clock alone report
+    // agreement about two copies that can no longer be used interchangeably.
+    const branched = (service: string, flavor: string, altering: string[] = []) => ({
+      name: 'IJT World', service, version: 37, netTime: 380746.24,
+      bytes: 1, flavor, mods: altering, modsWorldSafe: [], modsWorldAltering: altering,
+      complete: true,
+    });
+
+    it('reports a provenance split when one copy has been branched onto a modded rung', () => {
+      expect(divergence([
+        branched('valheim', 'vanilla'),
+        branched('valheim-loot', 'modded', ['EpicLoot.dll']),
+      ])).toBe('provenance');
+    });
+
+    it('treats an unstamped copy as disagreeing with a stamped one', () => {
+      expect(divergence([
+        branched('valheim', 'vanilla'),
+        { ...branched('valheim-qol', 'vanilla'), flavor: null },
+      ])).toBe('provenance');
+    });
+
+    it('reports provenance alongside the other splits', () => {
+      expect(divergence([
+        branched('valheim', 'vanilla'),
+        { ...branched('valheim-loot', 'modded', ['EpicLoot.dll']), version: 35, netTime: 500000 },
+      ])).toBe('save-format version and world clock and provenance');
+    });
   });
 
   // The question is not "can it run without mods" — a modded save loads on vanilla

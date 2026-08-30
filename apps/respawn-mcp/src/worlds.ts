@@ -138,10 +138,21 @@ export function divergence(copies: LibraryWorld[]): string | null {
   // Compared exactly: netTime is the same float read from the same header, so two copies
   // of one save agree bit for bit unless one has actually been played further.
   const clocks = new Set(copies.map((c) => c.netTime));
-  if (versions.size === 1 && clocks.size === 1) return null;
+  // Provenance is the third way copies disagree, and the only one that is irreversible.
+  // A world BRANCHES the moment one copy runs on a modded rung: that copy is stamped
+  // `modded` for ever while its siblings stay `vanilla`, and the two are then different
+  // worlds sharing a name. Reporting only version and clock made exactly that state
+  // invisible — a freshly branched copy has the same version and the same clock as the
+  // masters it was cut from, so the group rendered as one uniformly `vanilla` world and
+  // the "without mods: safe" line was printed over a copy that would be shredded by a
+  // vanilla load. That is the single mistake the stamp exists to prevent, so it cannot
+  // be the one the listing omits.
+  const flavors = new Set(copies.map((c) => c.flavor ?? 'unstamped'));
+  if (versions.size === 1 && clocks.size === 1 && flavors.size === 1) return null;
   const parts: string[] = [];
   if (versions.size > 1) parts.push('save-format version');
   if (clocks.size > 1) parts.push('world clock');
+  if (flavors.size > 1) parts.push('provenance');
   return parts.join(' and ');
 }
 

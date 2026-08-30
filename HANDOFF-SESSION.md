@@ -1,4 +1,4 @@
-# Respawn — where we are (2026-08-29)
+# Respawn — where we are (2026-08-30)
 
 Read `CLAUDE.md` first for the gotchas. This file is **current state and next step**.
 
@@ -6,15 +6,15 @@ Read `CLAUDE.md` first for the gotchas. This file is **current state and next st
 
 ## State right now
 
-**Branch `feat/valheim-mod-variants`, off `main` `af8fa34`.** Four commits: the variant
-lattice, the world-sync guards, the MCP command gating, and this doc. `main` itself is
-unchanged and pushed.
+**Branch `feat/valheim-mod-variants`, off `main` `af8fa34`.** The variant lattice, the
+world-sync guards, the MCP command gating, the world placement, and this doc. `main`
+itself is unchanged and pushed.
 
 **Every server is scaled to zero. Nothing is billing** beyond S3/EFS storage.
 
-Stacks that exist: `respawn-dev-valheim-loot` and `respawn-dev-valheim-overhaul` (both at
-desiredCount 0). `valheim` (vanilla), `valheim-admin`, `valheim-qol` and `valheim-build`
-have **never been deployed**. `respawn-dev-valheim-modded` was **destroyed** this session.
+Stacks that exist: `respawn-dev-valheim-{admin,qol,loot,build,overhaul}` — all five modded
+variants, all at desiredCount 0. Only `valheim` (the crossplay vanilla one) has **never
+been deployed**. `respawn-dev-valheim-modded` was destroyed on 2026-08-29 and is gone.
 
 ---
 
@@ -27,11 +27,11 @@ choice, and a save can sit in several libraries at once.
 | Variant | Mods | Client install | Worlds stamped | Deployed? |
 |---|---|---|---|---|
 | `valheim` | none, crossplay **on** (Xbox can join) | none | `vanilla` | never |
-| `valheim-admin` | rcon only | none | `vanilla` | **not yet** |
-| `valheim-qol` | + convenience (5 pkgs) | small | `vanilla` | not yet |
-| `valheim-loot` | + EpicLoot, CLLC, Drop/Spawn That | ~40 MB | **`modded`** | not yet |
-| `valheim-build` | + OdinArchitect, OdinsKingdom, PlantEverything | ~50 MB | **`modded`** | not yet |
-| `valheim-overhaul` | union of both + Therzie suite | ~500 MB | **`modded`** | not yet |
+| `valheim-admin` | rcon only | none | `vanilla` | **yes — `IJT World`** |
+| `valheim-qol` | + convenience (5 pkgs) | small | `vanilla` | **yes — `IJT World`** |
+| `valheim-loot` | + EpicLoot, CLLC, Drop/Spawn That | ~40 MB | **`modded`** | **yes — `IJT World` (branched)** |
+| `valheim-build` | + OdinArchitect, OdinsKingdom, PlantEverything | ~50 MB | **`modded`** | yes, no world yet |
+| `valheim-overhaul` | union of both + Therzie suite | ~500 MB | **`modded`** | yes, no world yet |
 
 Every modded variant: BepInEx, plugins from S3, crossplay **off** (required for mods —
 PC/Steam only), local image build (one shared rcon config shim).
@@ -41,8 +41,8 @@ They are a lattice: `qol → loot → overhaul` and `qol → build → overhaul`
 both rather than restating them, so the shape cannot drift.
 
 `valheim-modded` **was renamed to `valheim-admin`** — its only mod was the admin console,
-so the old name described how it was built rather than what it is for. The repo no longer
-describes the old service; the deployed stack still exists (see the migration below).
+so the old name described how it was built rather than what it is for. That migration is
+complete: the old stack is destroyed and `valheim-admin` is deployed in its place.
 
 Separate stacks mean separate EFS volumes and disjoint S3 prefixes, so neither can reach
 the other's world.
@@ -56,6 +56,12 @@ mirrors the volume back to `live/` on an interval and on SIGTERM. Drive it with
 each run. A save that has run a **world-altering** mod is refused by the vanilla server
 for ever. A mod declared `world-safe` in `mods.txt` (an rcon listener writes no prefabs)
 leaves the save `vanilla` and returnable.
+
+**A world put on a modded rung BRANCHES.** Each variant's library is its own files, so
+`IJT World` is now four copies: `vanilla` in `valheim`/`admin`/`qol`, `modded` in `loot`.
+They started byte-identical apart from the stamp — same version, same clock — which is
+why `list_worlds` now compares provenance and renders a diverged group per copy. See
+CLAUDE.md.
 
 **There is no default world**, on purpose. Valheim generates an empty world under an
 unknown name rather than failing, so every deploy must name one.
@@ -74,50 +80,52 @@ this repo.
 
 ---
 
-## ▶ NEXT: deploy the remaining three variants
+## ▶ NEXT: valheim-build and valheim-overhaul have no world
 
-**The migration is DONE. `valheim-loot` and `valheim-overhaul` are both proven end to end
-in AWS** (2026-08-30), then scaled back to 0. Nothing is billing beyond storage.
+**All five modded variants are now deployed and proven end to end** (2026-08-30), every
+one scaled back to 0. Nothing is billing beyond storage.
 
-What was verified, not assumed:
+| Variant | World it ran | Stamp it produced | Plugins loaded |
+|---|---|---|---|
+| `valheim-admin` | `IJT World` | **vanilla** (all world-safe) | 1 |
+| `valheim-qol` | `IJT World` | **vanilla** (all world-safe) | 6 |
+| `valheim-loot` | `IJT World` | **modded** (Jotunn, EpicLoot) | 13 |
+| `valheim-build` | `smoketest` (throwaway) | modded | 10 |
+| `valheim-overhaul` | `smoketest` (throwaway, prev. session) | modded | 21 |
 
-- `respawn-dev-valheim-modded` **destroyed**. Its volume held only the 325 KB fabricated
-  world CLAUDE.md documents; both real saves were confirmed intact locally at 29.8 MB /
-  211.5 days and 5.7 MB / 19.2 days before anything was deleted.
-- All 5 variants **synth clean**. Verified in the templates: rcon 2458/**tcp** has no
-  public ingress anywhere (only 2456-2458/udp), five **disjoint** S3 prefixes, and each
-  task role's object access scoped to its own prefix so no variant can reach another's.
-- **10 secrets created** (join password copied from the old service so players need no new
-  one; rcon generated fresh per service). **5 plugin sets published**, S3 counts matched
-  against local: 1 / 6 / 14 / 10 / 21 DLLs plus `.world-safe`.
-- `valheim-loot` **booted**: 14 plugins synced, BepInEx chainloader complete, the rcon
-  shim wrote the password (no "Password is empty"), `Start listening rcon commands`.
-- `valheim-overhaul` **booted** after the OOM fix below: all 21 plugins synced, all four
-  Therzie mods loaded (ConfigSync RPCs registered, recipes rewritten).
-- Both scaled to 0 with **nothing junk in S3**: the disposable `smoketest` world never got
-  a `.db` (no player ever connected) and the sidecar's guard declined to mirror a
-  half-world. A ~55-byte `smoketest.fwl` stub sits on each of those two volumes.
+Each was verified by rcon on the running task, not inferred: `admin`, `qol` and `loot`
+all answered `server_stats` with **Day 211, 651963 objects** — the real world, loaded.
+`build` answered Day 1 / 0 objects, which is the throwaway behaving correctly.
+
+### The world decision, made
+
+`IJT World` was **branched onto `valheim-loot`** — a deliberate one-way choice. The rule
+that matters: a variant's `worlds/` library is its own set of files, so this did NOT move
+the world. The copies in `valheim`, `valheim-admin` and `valheim-qol` are untouched and
+still `vanilla`; the loot copy alone is stamped `modded` and can never go back.
+
+`loot` was chosen over `build` because a save there can still **climb** to
+`valheim-overhaul` (a superset of its plugin set). It can never move sideways to
+`valheim-build`, which has no EpicLoot or CLLC.
+
+The loot library copy was `pull_world`ed after the run, so it now carries the modded
+stamp rather than the pre-branch one.
 
 ### Still to do
 
-1. **Deploy `valheim-admin`, `valheim-qol`, `valheim-build`.** Same image and mechanism as
-   the two that are proven, different plugin sets. **`valheim-admin` matters most: it
-   replaced `valheim-modded`, so right now there is NO administrable Valheim server at
-   all.** Each needs a world published into its library first — a headless deploy refuses
-   otherwise, because `DEPLOY_PROMPTS` only runs interactively.
-2. **Decide which world goes where.** A variant is a ruleset, not a world, so this is a
-   separate decision — and the one-way rule makes it consequential: publishing `IJT World`
-   into `loot`, `build` or `overhaul` stamps it `modded` for ever. `admin` and `qol` are
-   world-safe and keep it portable.
-3. **Redeploy `valheim-loot`** to pick up the world-sync OOM fix. It still runs the old
-   sidecar image. Nothing is broken today — its 45 MB payload syncs fine — but the fix is
-   what makes an arbitrary future mod set safe. `fromAsset` rebuilds the sidecar on any
-   deploy, so a plain redeploy is enough.
-4. **`/mcp` reconnect.** The MCP was reconnected once, and two bugs were fixed AFTER that
-   (the bogus "servers that do carry it" list, and the summary count disagreeing with the
-   body), so the running process is stale again.
-
----
+1. **Decide a world for `valheim-build` and `valheim-overhaul`.** Both are proven but
+   worldless — they ran throwaways. `build` is a sibling of `loot`, so a save cannot be
+   carried between them; the candidates are `IJT World 2024` (the 19.2-day snapshot of
+   the same seed, `hTL4AabAVHUo`) or another branch of `IJT World`. Each needs the save
+   copied into `apps/valheim/variants/<v>/worlds/` and a `DEPLOY_PROMPTS` line, exactly
+   as `loot` and `qol` now have.
+2. **`valheim` (crossplay/vanilla) has never been deployed.** It has both worlds in its
+   library and a `DEPLOY_PROMPTS` already, so it is one `switch_world` away.
+3. **`/mcp` reconnect.** `list_worlds` was fixed and the bundle rebuilt this session, so
+   the running process is stale again.
+4. **`IJT World` still has no backup outside this repo.** Unchanged, and still the
+   single most valuable loose end. There are now three S3 `live/` copies (admin, qol,
+   loot) but they are in the same account as everything else.
 
 ## Open questions, updated
 
@@ -190,5 +198,9 @@ deliberately; you said those were never really set up.
 - **State bucket** `respawn-state-847378615943` is private and versioned; the FastDL
   bucket is public-read by necessity. Never put a world in the latter.
 - **Valheim world data version is 37** as of 2026-08-29. Upgrades are one-way.
+- **Smoketest residue is cleaned.** `valheim-overhaul/live/` and `valheim-build/live/`
+  both held a fabricated `smoketest` world; both were deleted 2026-08-30. The bucket is
+  versioned, so the delete markers are reversible. Only `admin`, `qol` and `loot` have
+  anything in `live/`, and all three hold `IJT World`.
 - **The MCP is a separate process from the built bundle.** After changing
   `apps/respawn-mcp`, rebuild *and* `/mcp` to reconnect, or you are driving stale code.
