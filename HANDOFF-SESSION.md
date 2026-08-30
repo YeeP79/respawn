@@ -71,7 +71,17 @@ unknown name rather than failing, so every deploy must name one.
 | World | Version | State |
 |---|---|---|
 | `IJT World` | v37 | **canonical.** 211.5 in-game days. Upgraded from v35 on 2026-08-29 |
-| `IJT World 2024` | v33 | 19.2 days. May-2024 snapshot of the same seed — **the designated experiment world** |
+| `IJT Archive 2024-05` | v33 | 19.2 days. **The same world, 192 in-game days earlier** — not a separate one |
+
+**`IJT Archive 2024-05` was called `IJT World 2024` and was wrongly described as "the
+designated experiment world".** It is not a throwaway and not a separate save on a shared
+seed: its `.fwl` carries the same seed (899247957) *and* the same world **uid**
+(2371950828) as `IJT World`, and a uid is minted once at world creation, independently of
+the seed. So the two are one world at two points in time, and experimenting on it means
+experimenting on an old copy of the world that matters. Renamed 2026-08-30 (the name
+embedded in the `.fwl` too, not just the filenames) because the old pair differed only by
+a suffix. It is deliberately **absent from every `DEPLOY_PROMPTS`** — an archive to
+restore from, never a server to run.
 
 Two byte-identical v35 backups of `IJT World` exist under `worlds/.previous/`
 (`77ed7c64…`, matching the original archive extraction). The source archive is deleted;
@@ -115,14 +125,16 @@ stamp rather than the pre-branch one.
 
 1. **Decide a world for `valheim-build` and `valheim-overhaul`.** Both are proven but
    worldless — they ran throwaways. `build` is a sibling of `loot`, so a save cannot be
-   carried between them; the candidates are `IJT World 2024` (the 19.2-day snapshot of
-   the same seed, `hTL4AabAVHUo`) or another branch of `IJT World`. Each needs the save
-   copied into `apps/valheim/variants/<v>/worlds/` and a `DEPLOY_PROMPTS` line, exactly
-   as `loot` and `qol` now have.
-2. **`valheim` (crossplay/vanilla) has never been deployed.** It has both worlds in its
-   library and a `DEPLOY_PROMPTS` already, so it is one `switch_world` away.
-3. **`/mcp` reconnect.** `list_worlds` was fixed and the bundle rebuilt this session, so
-   the running process is stale again.
+   carried between them. `IJT Archive 2024-05` is NOT a candidate: it is the same world
+   as `IJT World`, so running it anywhere is a 192-in-game-day rollback, and it is kept
+   out of every prompt for exactly that reason. The realistic option is another one-way
+   branch of `IJT World`, copied into `apps/valheim/variants/<v>/worlds/` with a
+   `DEPLOY_PROMPTS` line, as `loot` and `qol` now have.
+2. **`valheim` (crossplay/vanilla) has never been deployed.** Its library holds `IJT
+   World` and the archive, and its `DEPLOY_PROMPTS` offers `IJT World` only, so it is one
+   `switch_world` away.
+3. ~~**`/mcp` reconnect.**~~ Done — reconnected, and `list_worlds` was re-verified
+   against the live libraries on the new bundle.
 4. **`IJT World` still has no backup outside this repo.** Unchanged, and still the
    single most valuable loose end. There are now three S3 `live/` copies (admin, qol,
    loot) but they are in the same account as everything else.
