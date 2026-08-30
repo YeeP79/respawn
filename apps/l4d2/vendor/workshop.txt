@@ -1,0 +1,35 @@
+# --- Respawn: L4D2 VENDORED WORKSHOP VPKs --------------------------------------
+# THE WORKSHOP HAS NO VERSION CONCEPT. `ws:3022416274 latest` is not a pin, it is a
+# promise that whatever the author published most recently is what you get — and an
+# author can republish under the same id with no signal at all.
+#
+# That collides badly with this repo's image tags, which are content hashes over the
+# COPYed files (see CLAUDE.md). An upstream republish either silently moves the tag,
+# forcing a rebuild nobody asked for, or — worse — does not, because the fetch happened
+# outside the build context. Either way "the same tag" stops meaning the same server.
+#
+# So a Workshop VPK is SNAPSHOTTED: downloaded once, hashed, and vendored to the private
+# state bucket. This file is the pin. The hash is checked on every fetch, and a mismatch
+# is a hard failure rather than a warning — a VPK that is not the one this manifest names
+# is exactly the thing being guarded against.
+#
+# THE S3 KEY CARRIES THE HASH, so re-snapshotting writes a NEW object beside the old one
+# instead of overwriting it. An older commit of this repo keeps fetching the bytes it was
+# built and tested against, which is the whole point of pinning and is lost the moment
+# the key is just `<id>.vpk`.
+#
+# Re-pinning is a deliberate act: `scripts/snapshot-workshop.sh` rewrites the hashes and
+# `scripts/publish-vendor.sh` uploads them. The resulting diff IS the review.
+#
+# Use the PRIVATE state bucket (respawn-state-*), never the public FastDL one. These are
+# somebody else's copyrighted work; mirroring them world-readable is a different act from
+# keeping a build reproducible.
+#
+# Format:  <workshop-id>  <sha256>  <bytes>  <captured>  # name
+#
+# `captured` is the date the bytes were taken, NOT an upstream version — the Workshop
+# does not expose one. It says how stale the snapshot is and nothing more.
+
+3022416274  9d9c5c1d8c218512daa489256b4af7b72f120f6243e3be9e6de1e4abca30e7fb    703335  2026-08-30  # Left 4 Bots 2
+2634208272  26b4169dc12422c1374e9fae8bbddd8f973f9307be71912011600a03f9ce6ad8    201405  2026-08-30  # Left 4 Lib — MANDATORY, L4B does nothing without it
+3226661388  8b0339fe17fef2a49f76a9908138a33d70a24e589f572f72c54945bde6326e8d  60437144  2026-08-30  # NavFixes — only needed for The Last Stand

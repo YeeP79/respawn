@@ -115,3 +115,7 @@ lab/s11-full-stack/payload/
 # S12 probe build output — same rule as apps/*/plugins/build/, and for the same
 # reason: the .sp is the artifact, the .smx is rebuilt from it.
 lab/s12-vscript-orders/build/
+
+# Vendored Workshop VPKs — the manifest and its hashes are tracked, the bytes are
+# not. They come back from the state bucket with scripts/fetch-vendor.sh.
+apps/l4d2/vendor/vpk/

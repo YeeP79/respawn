@@ -15,9 +15,14 @@
 # COMMAND surface — ~20 orders addressable to one bot, a named bot, or all of them,
 # on a priority queue, plus a user-editable vocalizer binding table. Every agent
 # ambition in docs/l4d2-agent-ambitions.md rests on that.
-ws:3022416274 latest    # Left 4 Bots 2
-ws:2634208272 latest    # Left 4 Lib — MANDATORY, L4B does nothing without it
-ws:3226661388 latest    # NavFixes — only needed for The Last Stand, cheap to carry
+# PINNED BY SNAPSHOT, not by version — the Workshop has no version concept and an
+# author can republish under the same id with no signal. `latest` here was a promise,
+# not a pin, and it collides with image tags being content hashes over COPYed files.
+# The bytes are vendored to the private state bucket and hashed in vendor/workshop.txt;
+# that file is the pin and `scripts/fetch-vendor.sh` fails hard on a mismatch.
+ws:3022416274 vendored  # Left 4 Bots 2
+ws:2634208272 vendored  # Left 4 Lib — MANDATORY, L4B does nothing without it
+ws:3226661388 vendored  # NavFixes — only needed for The Last Stand, cheap to carry
 
 # *** DEPLOY REQUIREMENT, AND IT FAILS SILENTLY ***
 #
@@ -33,6 +38,12 @@ ws:3226661388 latest    # NavFixes — only needed for The Last Stand, cheap to 
 #
 # Read at init (needs a restart). `l4u add <player> a` cannot bootstrap this — it
 # requires being admin already.
+#
+# SCOPE NARROWED BY S12: this gate is on `HandleCommand`, the CHAT-command path, so it
+# still governs what a human can type in game. It no longer governs the agent —
+# respawn_director v3 calls `Left4Bots.BotOrderAdd` through VScript, which is not behind
+# it, and was measured issuing orders on a server with no admins.txt and nobody
+# connected. Provision this for the players, not for the bridge.
 #
 # Shape this fits: the Valheim rcon config (apps/valheim/respawn-rcon-config.sh) —
 # a config file only the game container can write. Unlike that one it is NOT secret,

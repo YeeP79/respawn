@@ -25,7 +25,18 @@
 # a4d_force_panic present, a4d_force_tank / _reset_to_defaults "Unknown command".
 #
 # Popularity and commit count are not a command surface. Diff, do not assume.
-sp:AtomicStryker/all4dead2 master        # what S1/S2 built and S11 confirmed to be richer
+# PINNED TO A COMMIT. `master` was a moving branch, and the locator was also wrong: the
+# file does not live in a repo called all4dead2 at all, it is `customized/all4dead2.sp`
+# in AtomicStryker/atomicstrykers-codedump — a dump repo that moves constantly for
+# unrelated plugins. Pinned to the last commit that touched THIS file rather than to
+# repo HEAD, so unrelated churn cannot force a rebuild.
+#
+# Measured 2026-08-30: exactly one commit has ever touched it, in 2011, and that SHA
+# serves content byte-identical to master (sha256 f83c7e36…). The moving-branch risk was
+# real in form and empty in fact — which is only knowable by looking.
+sp:AtomicStryker/atomicstrykers-codedump@507cd07f8ea2d5ff7145ac03ce64287d0cdd08a3 customized/all4dead2.sp
+#   sha256 f83c7e3691f9a4eac72ab269c3a6c4e026e09aa37cb532f64595457d2f8055fc  (PLUGIN_VERSION 2.0.0)
+#   what S1/S2 built and S11 confirmed to be the richer of the two forks
 # sm:fbef0102/all4dead2 3.9              # REJECTED — 7 commands vs 12, see S11
 
 # Spawns special infected without the director's limits. Directly widens the
