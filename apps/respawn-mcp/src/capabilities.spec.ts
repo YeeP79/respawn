@@ -45,13 +45,19 @@ describe('resolveFamilies', () => {
   });
 
   it('counts commands, queries and unverified ones when both halves are present', () => {
-    const f = resolveFamilies('valheim-modded', { ...base, rconControl: { enabled: true } }, false);
+    const f = resolveFamilies('valheim-admin', { ...base, rconControl: { enabled: true } }, false);
     expect(f.commands.available).toBe(true);
     if (f.commands.available) {
       expect(f.commands.commandCount).toBeGreaterThan(0);
       expect(f.commands.queryCount).toBeGreaterThan(0);
-      // Authored from docs and not yet exercised — the flag is the honest signal.
-      expect(f.commands.unverified).toBe(f.commands.commandCount);
+      // `unverified` tracks which commands have actually been EXECUTED against a live
+      // server, and it is meaningful in both directions: most of this surface was
+      // authored from the server's own `list` and never run, while dropthat:reload was
+      // exercised on a real valheim-loot task. Asserting "all of them" once passed only
+      // because nothing had been verified yet, and would fail every time somebody did
+      // the work of verifying one.
+      expect(f.commands.unverified).toBeGreaterThan(0);
+      expect(f.commands.unverified).toBeLessThanOrEqual(f.commands.commandCount);
     }
   });
 

@@ -89,7 +89,7 @@ describe('world library', () => {
     // One world legitimately lives in several libraries — that is how a save moves
     // between the vanilla and modded servers. Only DISAGREEMENT matters.
     it('is silent when copies agree', () => {
-      expect(divergence([copy('valheim', 37, 380746.24), copy('valheim-modded', 37, 380746.24)])).toBeNull();
+      expect(divergence([copy('valheim', 37, 380746.24), copy('valheim-qol', 37, 380746.24)])).toBeNull();
     });
 
     it('is silent for a single copy', () => {
@@ -98,17 +98,17 @@ describe('world library', () => {
 
     // The exact case from the upgrade run: one library upgraded, the other not yet.
     it('reports a save-format split', () => {
-      expect(divergence([copy('valheim', 35, 380746.24), copy('valheim-modded', 37, 380746.24)]))
+      expect(divergence([copy('valheim', 35, 380746.24), copy('valheim-qol', 37, 380746.24)]))
         .toBe('save-format version');
     });
 
     it('reports a world-clock split — one copy has been played further', () => {
-      expect(divergence([copy('valheim', 37, 380746.24), copy('valheim-modded', 37, 500000)]))
+      expect(divergence([copy('valheim', 37, 380746.24), copy('valheim-qol', 37, 500000)]))
         .toBe('world clock');
     });
 
     it('reports both when both differ', () => {
-      expect(divergence([copy('valheim', 35, 380746.24), copy('valheim-modded', 37, 500000)]))
+      expect(divergence([copy('valheim', 35, 380746.24), copy('valheim-qol', 37, 500000)]))
         .toBe('save-format version and world clock');
     });
   });
@@ -125,21 +125,21 @@ describe('world library', () => {
     });
 
     it('is safe when only world-safe mods have run, and says how many', () => {
-      writeWorld('modded', 'Admin', {
+      writeWorld('qol', 'Admin', {
         flavor: 'vanilla', mods: ['ValheimRcon.dll'], safeMods: ['ValheimRcon.dll'], alteringMods: [],
       });
-      const w = readLibrary(path.join(root, 'modded'), 'valheim-modded')[0]!;
+      const w = readLibrary(path.join(root, 'qol'), 'valheim-qol')[0]!;
       expect(unmoddedOutlook(w).verdict).toBe('safe');
       expect(unmoddedOutlook(w).detail).toMatch(/1 mod\(s\) have run, all declared world-safe/);
     });
 
     // Naming the culprit is the point: "this is modded" does not tell you what you lose.
     it('names the world-altering mods when a vanilla load would destroy content', () => {
-      writeWorld('modded', 'Tainted', {
+      writeWorld('qol', 'Tainted', {
         flavor: 'modded', mods: ['ValheimRcon.dll', 'EpicLoot.dll'],
         safeMods: ['ValheimRcon.dll'], alteringMods: ['EpicLoot.dll'],
       });
-      const w = readLibrary(path.join(root, 'modded'), 'valheim-modded')[0]!;
+      const w = readLibrary(path.join(root, 'qol'), 'valheim-qol')[0]!;
       expect(unmoddedOutlook(w).verdict).toBe('DESTRUCTIVE');
       expect(unmoddedOutlook(w).detail).toMatch(/EpicLoot\.dll/);
       expect(unmoddedOutlook(w).detail).toMatch(/permanently/);
@@ -148,8 +148,8 @@ describe('world library', () => {
     // Stamps written before the split have no mods_world_altering, so the detail must
     // still be truthful without inventing a culprit.
     it('degrades honestly on a stamp that predates the split', () => {
-      writeWorld('modded', 'Old', { flavor: 'modded', mods: ['Something.dll'] });
-      const w = readLibrary(path.join(root, 'modded'), 'valheim-modded')[0]!;
+      writeWorld('qol', 'Old', { flavor: 'modded', mods: ['Something.dll'] });
+      const w = readLibrary(path.join(root, 'qol'), 'valheim-qol')[0]!;
       expect(w.modsWorldAltering).toEqual([]);
       expect(unmoddedOutlook(w).verdict).toBe('DESTRUCTIVE');
       expect(unmoddedOutlook(w).detail).toMatch(/a mod that ran on it/);

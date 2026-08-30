@@ -1,0 +1,25 @@
+# --- Respawn: Valheim — ADMIN base ------------------------------------------
+# Included by every modded variant. This is the floor: what a Valheim server needs to be
+# administrable at all, and nothing else.
+#
+# Vanilla Valheim has NO remote console. An admin must be a logged-in player, and even
+# then a dedicated server only accepts Group A commands (kick/ban/unban/banned/save/ping).
+# So mid-game administration — and therefore the whole MCP control surface — exists only
+# because of the plugin below. That is the single reason the admin variant is modded.
+#
+# Everything here MUST be world-safe. A variant that includes only this file stamps its
+# worlds `vanilla`, which is what lets a world run here and still go back to the plain
+# vanilla server afterwards.
+#
+# <namespace>/<package> <version> [world-safe]
+
+# Adds an rcon listener. RCON_PROTOCOL=source, so the existing rcon-control sidecar and
+# the whole MCP command surface work with no new transport. It opens a socket and runs
+# commands; it writes no prefabs, which is what the flag asserts.
+Tristan/ValheimRcon 1.5.1 world-safe
+
+# Optional, deliberately not enabled: JereKuusela/Server_devcommands 1.108.0 world-safe
+# It unlocks devcommands for admins and is world-safe, but it is primarily a CLIENT mod —
+# the server install only extends it — so turning it on here changes what admins can do
+# from their own game, not what this server can be driven to do remotely. Enable it if you
+# want in-game admin powers as well as remote ones.

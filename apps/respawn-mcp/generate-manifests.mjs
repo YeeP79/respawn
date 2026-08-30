@@ -4,7 +4,8 @@
 // rebuild — never a game redeploy.
 //
 // A manifest lives at apps/<name>/rcon-manifest.json, OR — for a project that ships
-// variants — at apps/<name>/variants/<v>/rcon-manifest.json, one per variant. A
+// variants — at apps/<name>/variants/<v>/rcon-manifest.json, one per variant, falling
+// back to the project's when a variant ships none. A
 // variant is keyed by its SERVICE_NAME (from its .env) so the bundle key matches the
 // deployed service the MCP will control.
 //
@@ -32,14 +33,20 @@ const selfName = 'respawn-mcp';
  * the .env files), so fall back to the TRACKED `.env.example`, which CLAUDE.md already
  * requires be kept in sync with `.env`. Guessing from the directory name is the last resort.
  */
-function variantServiceName(projectName, variantName, variantDir) {
+function variantEnvValue(variantDir, key) {
   for (const candidate of ['.env', '.env.example']) {
     const envFile = join(variantDir, candidate);
     if (!existsSync(envFile)) continue;
-    const match = /^\s*SERVICE_NAME\s*=\s*(.+?)\s*$/m.exec(readFileSync(envFile, 'utf-8'));
+    const match = new RegExp(`^\\s*${key}\\s*=\\s*(.+?)\\s*$`, 'm').exec(
+      readFileSync(envFile, 'utf-8'),
+    );
     if (match) return match[1].replace(/^["']|["']$/g, '');
   }
-  return `${projectName}-${variantName}`;
+  return undefined;
+}
+
+function variantServiceName(projectName, variantName, variantDir) {
+  return variantEnvValue(variantDir, 'SERVICE_NAME') ?? `${projectName}-${variantName}`;
 }
 
 // Collect { serviceName, file } for every manifest, descending into variants/.
@@ -53,7 +60,22 @@ for (const entry of readdirSync(appsDir, { withFileTypes: true })) {
     for (const variant of readdirSync(variantsDir, { withFileTypes: true })) {
       if (!variant.isDirectory()) continue;
       const variantDir = join(variantsDir, variant.name);
-      const file = join(variantDir, 'rcon-manifest.json');
+      // A variant with no manifest of its own falls back to the project's, mirroring the
+      // way .env layers. Variants differ in their MOD SET, not in the game's control
+      // surface: five copies of one Valheim manifest is five chances for four of them to
+      // go stale, and the only symptom would be a wrong command list on some servers.
+      const own = join(variantDir, 'rcon-manifest.json');
+      const shared = join(appsDir, entry.name, 'rcon-manifest.json');
+      // The shared manifest is inherited only by a variant that can actually be DRIVEN.
+      // Handing one to a variant with no rcon transport does not merely waste a bundle
+      // entry: capabilities.ts reads "manifest present, transport off" as drift and
+      // reports commands:UNREACHABLE(drift), so the vanilla Valheim variant — correctly
+      // consoleless, because the game offers none — would be advertised as misconfigured.
+      const file = existsSync(own)
+        ? own
+        : variantEnvValue(variantDir, 'ENABLE_RCON_CONTROL') === 'true'
+          ? shared
+          : own;
       if (!existsSync(file)) continue;
       targets.push({ serviceName: variantServiceName(entry.name, variant.name, variantDir), file });
     }

@@ -1,0 +1,38 @@
+# --- Respawn: Valheim LOOT variant ---------------------------------------------
+# ONE-WAY: this set registers prefabs, so a world that runs here is stamped `modded` and
+# can never go back to the vanilla or QoL servers.
+#
+# <namespace>/<package> <version> [world-safe]
+
+include ../../mods-qol.txt
+
+# Prefab-registration library. NOT declared world-safe: it ships four embedded asset
+# bundles and calls AddPrefab, and the default for anything unproven is unsafe. It is also
+# why the QoL base must stay Jotunn-free — see ../../mods-qol.txt.
+ValheimModding/Jotunn 2.29.2
+
+# Newtonsoft's Json.NET, required by EpicLoot. Declared world-safe on the strength of what
+# it is rather than a judgement call: it is a general-purpose serializer, and its two DLLs
+# contain no reference to ZNetScene, no prefab registration and no asset bundle at all.
+# Worth flagging rather than leaving to the conservative default, because the stamp's
+# world-altering list is what names the culprit when a world is refused — two library DLLs
+# sitting in it would point at the wrong thing.
+ValheimModding/JsonDotNET 13.0.4 world-safe
+
+# Loot drops, magic items and enchanting. Adds an enchanting table, an augmenter and
+# material items — those are the prefabs that make this rung one-way.
+RandyKnapp/EpicLoot 0.13.3
+
+# Creature levels, star ratings and boss affixes. Writes level/affix data onto existing
+# creature ZDOs rather than registering new prefabs, so removing it leaves vanilla
+# creatures rather than deleting anything.
+Smoothbrain/CreatureLevelAndLootControl 4.6.4 world-safe
+
+# Loot tables and spawner behaviour, both configured server-side. They change what vanilla
+# prefabs appear and how often; they add none.
+ASharpPen/Drop_That 3.1.4 world-safe
+ASharpPen/Spawn_That 1.2.18 world-safe
+
+# Concurrent chest access. Declares Jotunn, which is already above on this rung — which is
+# exactly why it is here rather than in the QoL base.
+MSchmoecker/MultiUserChest 0.6.1 world-safe

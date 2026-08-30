@@ -1,0 +1,21 @@
+# --- Respawn: Valheim OVERHAUL variant -----------------------------------------
+# The join of the loot and building rungs, plus the Therzie content suite.
+#
+# The two includes below are what make the lattice real rather than described: this file
+# does not restate either set, so a change to `loot` or `build` reaches here automatically
+# and the three cannot drift into a state where a world can no longer climb.
+#
+# <namespace>/<package> <version> [world-safe]
+
+include ../loot/mods.txt
+include ../build/mods.txt
+
+# The Therzie suite. Armory and Monstrum both hard-declare Therzie-Warfare-1.8.9, so
+# Warfare is the root of this group and cannot be dropped while the others are here.
+# Wizardry declares no dependency on it but is designed against the same content.
+#
+# All four register prefabs by the hundred: weapons, armor, creatures, spells, pieces.
+Therzie/Warfare 1.8.9
+Therzie/Armory 1.3.1
+Therzie/Monstrum 1.5.1
+Therzie/Wizardry 1.1.8

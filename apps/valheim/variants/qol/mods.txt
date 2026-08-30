@@ -1,0 +1,8 @@
+# --- Respawn: Valheim QoL variant ----------------------------------------------
+# The shared convenience set and nothing more. Everything it carries is world-safe, so
+# worlds run here stay stamped `vanilla` and remain portable back to the vanilla server.
+#
+# Adding a world-altering plugin here does not just change this server: it makes every
+# world that has ever run here permanently un-returnable. Use a content rung instead.
+
+include ../../mods-qol.txt

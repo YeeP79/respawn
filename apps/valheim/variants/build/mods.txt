@@ -1,0 +1,24 @@
+# --- Respawn: Valheim BUILDING variant -----------------------------------------
+# ONE-WAY: every piece and plant this set adds is a mod prefab written into the save.
+#
+# <namespace>/<package> <version> [world-safe]
+
+include ../../mods-qol.txt
+
+# Prefab-registration library — see the note in ../loot/mods.txt.
+ValheimModding/Jotunn 2.29.2
+
+# Build pieces: structures, decoration and larger-scale construction.
+OdinPlus/OdinArchitect 1.7.0
+OdinPlus/OdinsKingdom 1.5.1
+
+# DELIBERATELY ABSENT: MathiasDecrock/PlanBuild (blueprints). It hard-declares
+# ValheimModding/HookGenPatcher, and a PATCHER cannot be delivered by this pipeline — the
+# upstream image syncs only plugins/, so a patcher lands where nothing loads it and
+# PlanBuild fails to load on a server that otherwise looks healthy. fetch-mods.sh refuses
+# the package rather than building that payload. This is a missing capability, not an
+# oversight: adding it means a patcher prefix, a sidecar sync and a copy into /opt.
+
+# Plant berry bushes, thistle, mushrooms and the rest with the cultivator. Ships an asset
+# bundle and clones vanilla flora into new prefabs, so planted flora is mod-owned.
+Advize/PlantEverything 1.20.0

@@ -32,6 +32,18 @@ const commandShape = {
     .optional(),
   /** Name of the mod that adds this command, if any (e.g. "amxmodx"). */
   mod: z.string().optional(),
+  /**
+   * Thunderstore packages this needs to exist at all, as `<namespace>/<package>`.
+   *
+   * `mod` is a display label; this is the machine-checkable form, matched against the
+   * variant's tracked `mods.lock`. It exists because one manifest now serves several
+   * variants that differ only in their mod set: without it, a command EpicLoot provides
+   * is advertised identically on the admin rung, which does not have EpicLoot, and the
+   * failure is a confusing console reply rather than an honest "not on this server".
+   *
+   * Absent means unconditional — every variant carrying this manifest has it.
+   */
+  requires: z.array(z.string()).optional(),
   /** Flag destructive actions so the LLM (and the operator) treat them carefully. */
   danger: z.boolean().optional(),
   /**
@@ -84,6 +96,8 @@ const queryShape = {
   description: z.string(),
   /** rcon command whose reply is parsed, e.g. "status". */
   rcon: z.string(),
+  /** As on a command: Thunderstore packages this query needs. Absent means unconditional. */
+  requires: z.array(z.string()).optional(),
   /** Whole-reply single values: field name → regex with one capture group. */
   singles: z.record(z.string()).optional(),
   /** Per-line record extraction. */

@@ -1,0 +1,54 @@
+# --- Respawn: Valheim — QUALITY OF LIFE base --------------------------------
+# Included by every variant above the admin rung. Convenience only: nothing here adds
+# content, and nothing here changes the balance of the game.
+#
+# THE ENTIRE SET IS WORLD-SAFE, AND THAT IS LOAD-BEARING. A variant whose plugins are all
+# world-safe stamps its worlds `vanilla`, so a world can run here and still be moved back
+# to the plain vanilla server. Adding ONE unflagged plugin to this file makes every world
+# that runs on every variant including it `modded` — permanently, and for all of them.
+#
+# WHICH IS WHY THIS FILE MUST STAY JOTUNN-FREE. Jotunn ships four embedded asset bundles
+# and calls AddPrefab; it is a prefab-registration library and cannot honestly be asserted
+# world-safe. Anything depending on it belongs in a content rung, which is one-way anyway.
+# MSchmoecker/MultiUserChest is the mod this costs us — it declares Jotunn, so it lives in
+# the content rungs rather than here.
+#
+# Every entry below was checked against its own package: no RegisterPrefab call, no
+# embedded world assets, no Jotunn dependency.
+#
+# <namespace>/<package> <version> [world-safe]
+
+include mods-admin.txt
+
+# Quick stack, sort, trash and restock in one package. MultiUserChest names this as the
+# quick-stack mod it is explicitly compatible with, which matters if you later add it in a
+# content rung.
+Goldenrevolver/Quick_Stack_Store_Sort_Trash_Restock 1.4.13 world-safe
+
+# Craft using materials in nearby chests instead of carrying them to the bench.
+Azumatt/AzuCraftyBoxes 1.8.15 world-safe
+
+# An input field for crafting quantity, instead of clicking once per item.
+Azumatt/AAA_Crafting 2.1.6 world-safe
+
+# Plant a whole grid at once. Its own compatibility section excludes FarmGrid, MassFarming
+# and a mod it calls "Farming" — that reads as the planting-grid mod of that name rather
+# than Smoothbrain's farming SKILL mod, but the two have never been run together here, so
+# confirm in game before adding Smoothbrain/Farming to any variant that includes this.
+Advize/PlantEasily 2.1.1 world-safe
+
+# Pick any portal by name instead of pairing tags two at a time.
+Smoothbrain/TargetPortal 1.2.3 world-safe
+
+# --- Deliberately NOT enabled ------------------------------------------------
+# All world-safe, all popular, all excluded on the same ground: they change the balance of
+# the game rather than the convenience of playing it, and this file is included by every
+# variant. A balance change is a ruleset decision, which is what a variant is FOR — so put
+# these in a specific variant's mods.txt, not here.
+#
+#   OdinPlus/TeleportEverything 2.9.1 world-safe   carry ore through portals
+#   Azumatt/Recycle_N_Reclaim 1.4.1 world-safe     recover materials from crafted items
+#   Smoothbrain/Mining 1.1.6 world-safe            mining skill: more damage and yield
+#   Smoothbrain/Farming 2.2.2 world-safe           farming skill: faster growth, more yield
+#   Smoothbrain/Sailing 1.1.8 world-safe           sailing skill: ship health and speed
+#   Smoothbrain/DualWield 1.0.10 world-safe        dual wielding

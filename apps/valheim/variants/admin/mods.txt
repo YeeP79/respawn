@@ -1,0 +1,9 @@
+# --- Respawn: Valheim ADMIN variant --------------------------------------------
+# Vanilla gameplay plus a remote console, and nothing else. See ../../mods-admin.txt for
+# why that one plugin exists and why it is world-safe.
+#
+# Adding ANY world-altering plugin here costs this variant its reason to exist: its worlds
+# would stamp `modded` and stop being returnable to the vanilla server. Put gameplay mods
+# on a rung that is already one-way.
+
+include ../../mods-admin.txt
