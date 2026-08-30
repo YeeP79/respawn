@@ -1,218 +1,202 @@
-# Respawn — where we are (2026-08-30)
+# Respawn — where we are (2026-08-30, late)
 
-Read `CLAUDE.md` first for the gotchas. This file is **current state and next step**.
+Read `CLAUDE.md` first for the fleet-wide gotchas. This file is **current state and
+next step**, and right now the active thread is **L4D2**.
 
 ---
 
 ## State right now
 
-**Branch `feat/valheim-mod-variants`, off `main` `af8fa34`.** The variant lattice, the
-world-sync guards, the MCP command gating, the world placement, and this doc. `main`
-itself is unchanged and pushed.
+**Branch `main`, 9 commits ahead of `origin/main` — NOT pushed.** All of today's L4D2
+work is committed locally and the full check suite is green (`typecheck test lint
+build`). Nothing is deployed; every server in the fleet is still scaled to zero.
 
-**Every server is scaled to zero. Nothing is billing** beyond S3/EFS storage.
-
-Stacks that exist: `respawn-dev-valheim-{admin,qol,loot,build,overhaul}` — all five modded
-variants, all at desiredCount 0. Only `valheim` (the crossplay vanilla one) has **never
-been deployed**. `respawn-dev-valheim-modded` was destroyed on 2026-08-29 and is gone.
-
----
-
-## What Valheim now is
-
-Six variants, deliberately separate services. A variant is a **ruleset** (which mods load,
-what can drive the server) and NOT a world — which world runs on one is a deploy-time
-choice, and a save can sit in several libraries at once.
-
-| Variant | Mods | Client install | Worlds stamped | Deployed? |
-|---|---|---|---|---|
-| `valheim` | none, crossplay **on** (Xbox can join) | none | `vanilla` | never |
-| `valheim-admin` | rcon only | none | `vanilla` | **yes — `IJT World`** |
-| `valheim-qol` | + convenience (5 pkgs) | small | `vanilla` | **yes — `IJT World`** |
-| `valheim-loot` | + EpicLoot, CLLC, Drop/Spawn That | ~40 MB | **`modded`** | **yes — `IJT World` (branched)** |
-| `valheim-build` | + OdinArchitect, OdinsKingdom, PlantEverything | ~50 MB | **`modded`** | yes, no world yet |
-| `valheim-overhaul` | union of both + Therzie suite | ~500 MB | **`modded`** | yes, no world yet |
-
-Every modded variant: BepInEx, plugins from S3, crossplay **off** (required for mods —
-PC/Steam only), local image build (one shared rcon config shim).
-
-They are a lattice: `qol → loot → overhaul` and `qol → build → overhaul`. `loot` and
-`build` are siblings a world cannot move between. `variants/overhaul/mods.txt` *includes*
-both rather than restating them, so the shape cannot drift.
-
-`valheim-modded` **was renamed to `valheim-admin`** — its only mod was the admin console,
-so the old name described how it was built rather than what it is for. That migration is
-complete: the old stack is destroyed and `valheim-admin` is deployed in its place.
-
-Separate stacks mean separate EFS volumes and disjoint S3 prefixes, so neither can reach
-the other's world.
-
-**World saves round-trip.** The `world-sync` sidecar seeds from a one-shot `inbox/` and
-mirrors the volume back to `live/` on an interval and on SIGTERM. Drive it with
-`list_worlds`, `world_status`, `publish_world`, `pull_world`, `clear_world`,
-`switch_world` — or `pnpm valheim:world:*`.
-
-**Saves carry provenance.** `<world>.respawn.json` records flavor, which plugins ran, and
-each run. A save that has run a **world-altering** mod is refused by the vanilla server
-for ever. A mod declared `world-safe` in `mods.txt` (an rcon listener writes no prefabs)
-leaves the save `vanilla` and returnable.
-
-**A world put on a modded rung BRANCHES.** Each variant's library is its own files, so
-`IJT World` is now four copies: `vanilla` in `valheim`/`admin`/`qol`, `modded` in `loot`.
-They started byte-identical apart from the stamp — same version, same clock — which is
-why `list_worlds` now compares provenance and renders a diverged group per copy. See
-CLAUDE.md.
-
-**There is no default world**, on purpose. Valheim generates an empty world under an
-unknown name rather than failing, so every deploy must name one.
-
-### The worlds
-
-| World | Version | State |
-|---|---|---|
-| `IJT World` | v37 | **canonical.** 211.5 in-game days. Upgraded from v35 on 2026-08-29 |
-| `IJT Archive 2024-05` | v33 | 19.2 days. **The same world, 192 in-game days earlier** — not a separate one |
-
-**`IJT Archive 2024-05` was called `IJT World 2024` and was wrongly described as "the
-designated experiment world".** It is not a throwaway and not a separate save on a shared
-seed: its `.fwl` carries the same seed (899247957) *and* the same world **uid**
-(2371950828) as `IJT World`, and a uid is minted once at world creation, independently of
-the seed. So the two are one world at two points in time, and experimenting on it means
-experimenting on an old copy of the world that matters. Renamed 2026-08-30 (the name
-embedded in the `.fwl` too, not just the filenames) because the old pair differed only by
-a suffix. It is deliberately **absent from every `DEPLOY_PROMPTS`** — an archive to
-restore from, never a server to run.
-
-Two byte-identical v35 backups of `IJT World` exist under `worlds/.previous/`
-(`77ed7c64…`, matching the original archive extraction). The source archive is deleted;
-`apps/*/worlds/` is gitignored and is the **only** copy — it needs a backup that is not
-this repo.
+```
+2a39113 docs: agent ambitions, MCP tooling gaps, and the spike ledger
+07be887 feat(l4d2): respawn_director — the agent's bridge into Left 4 Bots
+becbae8 feat(_shared): ship Source server logs to stdout
+e986d7a feat(l4d2): mod manifests — 43 entries across seven tiers
+6c3012d fix(l4d2): remove two non-functional cvars, correct S2
+2c0544f spike(S11): full stack loads; Accelerator broken; A4D2 fork rejected
+a4120c0 spike(S10): VScript addons run server-side; silent permission gate
+fbab3f1 spike(S4, S9): clients need the campaign; server cannot push it
+```
 
 ---
 
-## ▶ NEXT: valheim-build and valheim-overhaul have no world
+## What L4D2 now is
 
-**All five modded variants are now deployed and proven end to end** (2026-08-30), every
-one scaled back to 0. Nothing is billing beyond storage.
+**Ten of eleven spikes closed.** Only **S6** (the fifth-player ritual) remains, and it
+needs two humans on a server at once.
 
-| Variant | World it ran | Stamp it produced | Plugins loaded |
-|---|---|---|---|
-| `valheim-admin` | `IJT World` | **vanilla** (all world-safe) | 1 |
-| `valheim-qol` | `IJT World` | **vanilla** (all world-safe) | 6 |
-| `valheim-loot` | `IJT World` | **modded** (Jotunn, EpicLoot) | 13 |
-| `valheim-build` | `smoketest` (throwaway) | modded | 10 |
-| `valheim-overhaul` | `smoketest` (throwaway, prev. session) | modded | 21 |
+**The service is still `apps/l4d2` — stock upstream image, no mods, no rcon
+transport.** `ENABLE_RCON_CONTROL` is unset and there is no `variants/` dir. Everything
+below was proven on **local `docker run`**, not on anything deployed.
 
-Each was verified by rcon on the running task, not inferred: `admin`, `qol` and `loot`
-all answered `server_stats` with **Day 211, 651963 objects** — the real world, loaded.
-`build` answered Day 1 / 0 objects, which is the throwaway behaving correctly.
+### The design, settled by measurement
 
-### The world decision, made
+- **Custom campaigns are a branch, not a knob** (S4, S9). A client without the campaign
+  connects, is admitted as player 1, then dies on `Host_Error: CMapLoadHelper::Init`.
+  The server cannot push it — zero HTTP requests to a live FastDL host, and no
+  `host_workshop_*` / `ugc` / `sv_allowdownload` on this build. **There is no FastDL
+  bucket in the design**; it would be infrastructure nothing reads.
+- **VScript addons run server-side** (S10), so Left 4 Bots is base-eligible. What
+  blocked it for hours was `Left4Lib` auto-promoting to Admin **only** when
+  `Director.IsSinglePlayerGame()` — on a dedicated server everyone is level 0 and
+  every order is dropped **silently**.
+- **The full stack loads** (S11): 49/50 plugins, 12/13 extensions.
+- **Bots are a base tier.** These servers are empty most of their life, so the normal
+  session is one or two humans plus three bots.
 
-`IJT World` was **branched onto `valheim-loot`** — a deliberate one-way choice. The rule
-that matters: a variant's `worlds/` library is its own set of files, so this did NOT move
-the world. The copies in `valheim`, `valheim-admin` and `valheim-qol` are untouched and
-still `vanilla`; the loot copy alone is stamped `modded` and can never go back.
+### What was built
 
-`loot` was chosen over `build` because a save there can still **climb** to
-`valheim-overhaul` (a superset of its plugin set). It can never move sideways to
-`valheim-build`, which has no EpicLoot or CLLC.
+| Path | What it is |
+|---|---|
+| `apps/l4d2/mods/` | 43 mods, 7 tiers, Valheim-shaped (`include`, tracked manifests) |
+| `apps/l4d2/plugins/respawn_director.sp` | the agent's bridge — inbox, orders, scene, give |
+| `apps/l4d2/scripts/build-plugins.sh` | compile against the **server's own** spcomp64 |
+| `apps/l4d2/scripts/watch-inbox.sh` | push trigger for the Monitor tool (no polling) |
+| `apps/l4d2/client/respawn.cfg` | F-key macros; installed at `left4dead2/cfg/respawn.cfg` |
+| `apps/_shared/source-logship.sh` | ships SourceMod + game logs to stdout |
+| `docs/l4d2-agent-ambitions.md` | six ideas, each tagged measured / source / inferred |
+| `docs/mcp-tooling-gaps.md` | six gaps, each tied to an incident |
 
-The loot library copy was `pull_world`ed after the run, so it now carries the modded
-stamp rather than the pre-branch one.
-
-### Still to do
-
-1. **Decide a world for `valheim-build` and `valheim-overhaul`.** Both are proven but
-   worldless — they ran throwaways. `build` is a sibling of `loot`, so a save cannot be
-   carried between them. `IJT Archive 2024-05` is NOT a candidate: it is the same world
-   as `IJT World`, so running it anywhere is a 192-in-game-day rollback, and it is kept
-   out of every prompt for exactly that reason. The realistic option is another one-way
-   branch of `IJT World`, copied into `apps/valheim/variants/<v>/worlds/` with a
-   `DEPLOY_PROMPTS` line, as `loot` and `qol` now have.
-2. **`valheim` (crossplay/vanilla) has never been deployed.** Its library holds `IJT
-   World` and the archive, and its `DEPLOY_PROMPTS` offers `IJT World` only, so it is one
-   `switch_world` away.
-3. ~~**`/mcp` reconnect.**~~ Done — reconnected, and `list_worlds` was re-verified
-   against the live libraries on the new bundle.
-4. **`IJT World` still has no backup outside this repo.** Unchanged, and still the
-   single most valuable loose end. There are now three S3 `live/` copies (admin, qol,
-   loot) but they are in the same account as everything else.
-
-## Open questions, updated
-
-1. ~~**Which mods.**~~ **Answered.** Classified by measurement, not lore: a mod is
-   world-altering if it registers prefabs (`RegisterPrefab`/`PrefabManager`/`Custom*` plus
-   an embedded `UnityFS` bundle in its DLL). Sets are pinned in the manifests and locked
-   in each variant's tracked `mods.lock`.
-2. **Client parity.** Still untested with more than zero players. `mods.lock` is now the
-   authoritative list to build the r2modman modpack from.
-3. **Mod config files are STILL not solved in general.** ValheimRcon's password needed a
-   shim on `PRE_SERVER_RUN_HOOK` because BepInEx reads config from
-   `/opt/valheim/bepinex/BepInEx/config/`, which no sidecar mounts. The shim is still
-   hard-coded to one plugin's file; a second configured mod needs it generalised. **None
-   of the mods added here is config-file driven**, so nothing forced the issue yet.
-4. **`world-safe` is still an operator assertion.** But it is now a *checked-against*
-   assertion: the mechanical screen is recorded per package in the manifests, and `Jotunn`
-   is explicitly NOT flagged (four asset bundles, calls `AddPrefab`) which is why
-   `mods-qol.txt` must stay Jotunn-free.
-5. **Every manifest command is still `unverified`, deliberately.** `dropthat:reload` is
-   ACCEPTED by the console (unlike EpicLoot's, which are rejected) but its effect was never
-   observed — no config re-read was logged — and the manifest's own bar for clearing the
-   flag is "executed AND seen to take effect". Clear it once a config change is seen to
-   take hold. The manifest is shared at the project level, so clearing a flag fixes it for
-   all five modded variants at once.
-6. **Mod console commands are reachable but mostly useless, and now fully enumerated.**
-   `consoleCommand` answers `Command 'X' executed.` regardless of outcome, so results are
-   read from `server_logs` and a typo is indistinguishable from success. EpicLoot's 30
-   commands answer "not valid in the current context" on a dedicated server — they need a
-   player. The fleet's entire mod-provided surface is Drop That's three plus Spawn That's
-   five; `valheim-overhaul`'s 82 console commands are byte-identical to `valheim-loot`'s,
-   so the Therzie suite adds none despite all four DLLs containing the string
-   `ConsoleCommand`. Declared with `requires`, so they appear on `loot`/`overhaul` and are
-   refused elsewhere. See CLAUDE.md.
-7. **Patcher delivery is a missing capability.** A BepInEx *patcher* cannot be installed by
-   this pipeline (the upstream image syncs only `plugins/`), and `fetch-mods.sh` refuses
-   one rather than building a payload that silently does nothing. This is why `PlanBuild`
-   is absent from `valheim-build`. Adding it means a second published prefix, a second
-   sidecar sync, and a copy into `/opt` from the shim.
+**Proven end to end, live:** player presses a key → plugin captures intent with position
+and aim frozen at that instant → agent notified without polling → agent picks an order
+from L4B's vocabulary → bots obey.
 
 ---
 
-## L4D2 spikes — unchanged
+## ▶ NEXT: five open items, then deploy and test
 
-`docs/spikes/` — six of eight pass. **S4 and S6 remain, both need a human with L4D2
-open.** S4 decides whether custom campaigns are a setting or their own server; S6 defines
-the fifth-player ritual. Neither moved this session.
+The user asked for all five, then a live test. In dependency order:
 
----
+### 1. `respawn_director` v3 — VScript order injection
 
-## Fleet health worth knowing
+**Biggest win, unblocks the rest.** Today's bridge impersonates a player with
+`FakeClientCommand`, which means (a) L4B checks *that player's* level, so
+`ems/left4lib/cfg/admins.txt` must be provisioned per server, and (b) position orders
+inherit the impersonated player's **live crosshair**, so `wait there` lands wherever
+they happen to be looking seconds later.
 
-`list_services` reports which tool families apply per service. It surfaced six services
-shipping an `rcon-manifest.json` with `ENABLE_RCON_CONTROL` **off** — declared commands
-that cannot be reached: `cs2`, `css`, `gmod`, `l4d2`, `quake3`, `tf2`. Left alone
-deliberately; you said those were never really set up.
+Both go away by calling L4B's order API directly. Everything needed is **verified
+present**:
+
+```c
+native bool L4D2_ExecVScriptCode(char[] code);   // left4dhooks.inc, now in the S1 image
+```
+```squirrel
+Left4Bots.BotOrderAdd(bot, orderType, from, destEnt, destPos, destLookAtPos, ...)
+```
+
+`destPos`/`destLookAtPos` take literal vectors. The permission check lives in
+`HandleCommand`, **not** in `BotOrderAdd` — so this path needs no admin file at all.
+
+A probe plugin using `L4D2_ExecVScriptCode` + `GetClientEyePosition` **compiles clean**
+already. The one inferred link is whether the VScript call reaches `BotOrderAdd`
+successfully; test that first before building on it.
+
+### 2. Accelerator — fix or drop
+
+Fails on `left4devops/l4d2` with `GLIBCXX_3.4.21 not found`. Currently commented out in
+`mods-stability.txt`. A crash reporter that silently fails to load is a **false
+assurance** about the one thing nobody is watching — so either find a build matching
+this base image's libstdc++, or remove it and say why.
+
+### 3. Slot machinery — half-loaded, unexplained
+
+`sv_maxplayers` present (max 31), `sv_removehumanlimit` **absent**, and `L4DToolZ` does
+not appear in `meta list`. Something provides half the surface. **S5's `oldlinux`
+finding is the first suspect** — S5 measured L4DToolZ inert at four players, it did not
+measure whether this particular build loads at all. Nobody should build a big-coop
+variant on this state.
+
+### 4. Pin the unpinnables
+
+Four entries cannot be version-pinned, and **three are what everything was built on**:
+
+```
+ws:3022416274  latest   Left 4 Bots 2      Workshop has NO version concept
+ws:2634208272  latest   Left 4 Lib
+ws:3226661388  latest   NavFixes
+sp:AtomicStryker/all4dead2  master         a moving branch
+```
+
+Image tags are content hashes over COPYed files, so an upstream change silently moves
+the tag — or worse, doesn't while the content does. Fix: **vendor the VPKs to the state
+bucket** with recorded hashes, and pin all4dead2 to a SHA the way Left4DHooks already is.
+
+### 5. Build with OUR pins, not the pack's
+
+S11 proved **the curated pack's** versions co-exist. Ours are newer everywhere they
+overlap (Left4DHooks 1.168 vs 1.161, SourceMod git7251 vs git7221, MetaMod git1410 vs
+git1380) and have never been loaded together.
+
+### Then: deploy and test
+
+Create `apps/l4d2/variants/modded/`, deploy, join, exercise the agent loop against a
+real Fargate task rather than a local container.
 
 ---
 
 ## Facts worth not re-deriving
 
-- **AWS**: account `847378615943`, `us-east-1`, profile `respawn`. Log in with
-  `aws sso login --profile respawn` (add `--use-device-code` if the browser is signed into
-  the work portal).
-- **Secrets exist for every service**: `valheim` (`SERVER_PASS`) and all five modded
-  variants (`SERVER_PASS` + `RCON_PASSWORD`), created 2026-08-30. The join password was
-  COPIED from the retired `valheim-modded` secret, so players need no new one; each rcon
-  password is freshly generated per service. `respawn/valheim-modded/*` still exists and is
-  now unreferenced — safe to delete once nobody wants the old join password back.
-  Read one back with `reveal_secret` — the join password is not in any transcript.
-- **State bucket** `respawn-state-847378615943` is private and versioned; the FastDL
-  bucket is public-read by necessity. Never put a world in the latter.
-- **Valheim world data version is 37** as of 2026-08-29. Upgrades are one-way.
-- **Smoketest residue is cleaned.** `valheim-overhaul/live/` and `valheim-build/live/`
-  both held a fabricated `smoketest` world; both were deleted 2026-08-30. The bucket is
-  versioned, so the delete markers are reversible. Only `admin`, `qol` and `loot` have
-  anything in `live/`, and all three hold `IJT World`.
-- **The MCP is a separate process from the built bundle.** After changing
-  `apps/respawn-mcp`, rebuild *and* `/mcp` to reconnect, or you are driving stale code.
+**The command surface (S2, corrected).** All4Dead2 registers 12 usable commands.
+`a4d_spawn_item` and `a4d_spawn_weapon` can **never** be driven by rcon — they route
+through `give`, which hard-refuses a console caller. They need a player *caller*, not a
+player present, so no amount of population fixes it. `respawn_director`'s `sm_rd_give`
+exists because of this.
+
+**Keep AtomicStryker's All4Dead2.** The better-maintained fork (fbef0102, 303 stars)
+registers **7 commands to our 12**, dropping `force_tank`, `force_witch`, `add_zombies`,
+`continuous_bosses` and `reset_to_defaults` — the safety valve. Diffed and confirmed
+live in S11. Popularity is not a command surface.
+
+**`spawn_*` is instant and local; `force_*` is director-placed and slow.** Different UX;
+a manifest presenting both as "spawn a witch" will feel arbitrary.
+
+**Testing traps that produce a CONFIDENTLY WRONG answer, not an error:**
+
+- **Steam restores "unsubscribed" Workshop files by itself**, with the game closed.
+  Moving a VPK aside is not a valid way to make a client lack content. Use
+  `steamcmd +login anonymous +workshop_download_item 550 <id>` — no account needed, and
+  `<id>_legacy.bin` **is** the VPK.
+- **`docker-proxy` breaks the Source connect handshake while passing A2S.** Publish a
+  port and every health check succeeds while no client can connect. Address the
+  container's **bridge IP and its own port** (`172.17.0.2:27015`). `--network host` is
+  not the fix — the container's Steam collides with the host's and breaks A2S too.
+- **A2S is not a joinability check.** It measures population. It stayed green through an
+  hour of an unjoinable server.
+- **`sv_allow_lobby_connect_only` defaults to 1** and refuses direct `connect` outright.
+- **`sed` block-buffers into a pipe.** A log shipper without `sed -u` reads correctly and
+  delivers nothing until ~4KB accumulates.
+- **There is no `ps` in the game image.** Use `/proc`. A `ps`-based check returns 0 and
+  looks like a real measurement.
+- **Verify the observation channel before each reading, not after.** Four consecutive
+  "nothing happened" readings during S10 were taken against a log that had already died.
+
+**Running a local test server** (the S4/S10/S11 recipe):
+
+```bash
+docker run -d --name s11srv \
+  -v "$PWD/apps/_shared/source-logship.sh:/logship.sh:ro" \
+  --entrypoint /bin/sh l4d2-full:s11 -c \
+  'cd /home/louis/l4d2 && exec /bin/sh /logship.sh /home/louis/l4d2/left4dead2 \
+     ./srcds_run -game left4dead2 -console -norestart -ip 0.0.0.0 -port 27015 \
+     +sv_lan 1 +rcon_password spikepw +maxplayers 4 +sv_allow_lobby_connect_only 0 \
+     +map c1m1_hotel coop'
+# then:  python3 lab/srcds-rcon.py 172.17.0.2 27015 spikepw "status"
+# client: connect 172.17.0.2:27015     (NOT a published port)
+```
+
+Images `l4d2-full:s11`, `l4d2-base-spike:s1`, `l4d2-slots-spike:s5` are built locally.
+`lab/s11-full-stack/payload/` is gitignored and rebuilt with
+`git clone --depth 1 https://github.com/SNWCreations/l4d2-modded-server`.
+
+---
+
+## Valheim — done, unchanged
+
+The six-variant lattice, world-save round trip, mod manifests with `include`/`mods.lock`,
+and the rcon config shim all landed in earlier sessions and are on `main`. Nothing this
+session touched Valheim.
