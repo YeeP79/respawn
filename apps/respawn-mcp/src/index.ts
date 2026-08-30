@@ -47,6 +47,7 @@ import {
   type ServiceFamilies,
 } from './capabilities.js';
 import { resolveCvarCommand, resolveWireCommand } from './manifest.js';
+import { readInstalledPackages, requirementsMet } from './mods.js';
 import { runQuery } from './query-engine.js';
 import { readLibrary, inGameDays, divergence, unmoddedOutlook, type LibraryWorld } from './worlds.js';
 import {
@@ -162,6 +163,7 @@ function familiesFor(svc: DiscoveredService): ServiceFamilies {
     svc.name,
     svc.config,
     resolveServiceScript(svc.path, 'check-content') !== null,
+    svc.path,
   );
 }
 
@@ -235,7 +237,7 @@ async function runAndFormat(service: string, command: string, opts: { write?: bo
  * A service's script, from its own `scripts/` dir or — for a variant — its project's.
  *
  * Variants of one project usually share tooling: apps/valheim's world scripts are
- * identical for `vanilla` and `valheim-modded` and take the variant as an argument, so
+ * identical for every variant and take the variant as an argument, so
  * duplicating them per variant would mean two copies drifting apart. Falls back rather
  * than replacing, so a variant can still override with its own copy.
  */
@@ -363,7 +365,7 @@ server.registerTool(
     }
     // A running target lets us fill in live maps; absence is fine (degrades).
     const target = await findTarget(service);
-    const caps = await resolveCapabilities(service, target);
+    const caps = await resolveCapabilities(service, target, resolveConfiguredService(service, 'dev').path);
     // The family summary goes on BOTH branches. It used to exist only where a manifest
     // was missing, so the services with the richest surface were the ones told least
     // about it — a manifested service never learned that world saves or secrets applied.
@@ -435,6 +437,33 @@ server.registerTool(
       const names = manifest?.commands.map((c) => c.name).join(', ') || '(none)';
       return textResult(
         `No command "${command}" for ${service}. Available: ${names}.`,
+        true,
+      );
+    }
+    // Declared in the manifest but not installed on THIS variant. Without this the call
+    // would reach the console and come back "Command 'x' executed." — Valheim's
+    // consoleCommand reports that for a command that does not exist just as readily as
+    // for one that ran, so the failure would be silent and read as success.
+    const gate = requirementsMet(def, readInstalledPackages(resolveConfiguredService(service, 'dev').path));
+    if (!gate.met) {
+      // Must NOT reuse requirementsMet here. Its unknown-is-available fallback is right for
+      // the gate (a service with no mods.lock must not lose its command surface) and wrong
+      // for this suggestion: every non-Valheim service returns null and would be listed as
+      // "carrying" a Valheim mod. A carrier is a service that demonstrably HAS the package.
+      const carriers = manifestedServices().filter((other) => {
+        try {
+          const packages = readInstalledPackages(resolveConfiguredService(other, 'dev').path);
+          return packages !== null && (def.requires ?? []).every((pkg) => packages.has(pkg));
+        } catch {
+          return false;
+        }
+      });
+      return textResult(
+        `"${command}" is declared for ${service} but this server does not carry ` +
+          `${gate.missing.join(', ')}, so the command does not exist on it. ` +
+          `Valheim's consoleCommand answers "executed" either way, so calling it would ` +
+          `look like it worked.\n\n` +
+          `Servers that do carry it: ${carriers.join(', ') || '(none configured)'}.`,
         true,
       );
     }
@@ -1407,7 +1436,7 @@ server.registerTool(
       'publishing (a stale push discards played progress) and BEFORE rotating. An ' +
       'unreachable bucket is reported as UNKNOWN, never as "nothing staged".',
     inputSchema: {
-      service: z.string().describe('Service name, e.g. "valheim" or "valheim-modded"'),
+      service: z.string().describe('Service name, e.g. "valheim" or "valheim-qol"'),
       environment: environmentSchema,
     },
   },
@@ -1611,7 +1640,7 @@ server.registerTool(
       'gate — generate_secret mints a random value and does not return it, so being able ' +
       'to replace a secret does not imply being able to learn the stored one.',
     inputSchema: {
-      service: z.string().describe('Service name, e.g. "valheim-modded"'),
+      service: z.string().describe('Service name, e.g. "valheim-qol"'),
       secret: z.string().describe('Container env var name from SECRET_REFS, e.g. "SERVER_PASS"'),
       environment: environmentSchema,
     },

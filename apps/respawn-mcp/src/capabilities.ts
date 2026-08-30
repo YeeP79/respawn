@@ -1,4 +1,5 @@
 import type { Manifest } from './manifest.js';
+import { readInstalledPackages, requirementsMet } from './mods.js';
 import { MANIFESTS } from './manifests.generated.js';
 import { execRcon, type ExecTarget } from './exec.js';
 
@@ -7,6 +8,16 @@ export interface ResolvedCapabilities extends Omit<Manifest, 'maps'> {
   maps?: string[];
   /** Set when `maps` is "live" but the live query could not run. */
   mapsNote?: string;
+  /**
+   * Manifest entries this particular service CANNOT run, with the packages they need.
+   *
+   * Reported rather than omitted: one manifest serves several variants that differ only
+   * in their mod set, and "declared, but not on this server" is a different answer from
+   * "never declared" — the first tells you which variant to run it on.
+   */
+  unavailableHere?: Array<{ name: string; needs: readonly string[] }>;
+  /** Why `unavailableHere` is non-empty, in words, for the model reading this. */
+  unavailableNote?: string;
 }
 
 /** Returns the bundled manifest for a service, or undefined if none was authored. */
@@ -40,12 +51,36 @@ export function parseMapList(raw: string): string[] {
 export async function resolveCapabilities(
   service: string,
   target: ExecTarget | undefined,
+  servicePath?: string,
 ): Promise<ResolvedCapabilities | undefined> {
   const manifest = getManifest(service);
   if (!manifest) return undefined;
 
   const { maps, ...rest } = manifest;
   const resolved: ResolvedCapabilities = { ...rest };
+
+  // One manifest now serves several variants that differ ONLY in their mod set, so the
+  // surface has to be filtered per service or it advertises commands the target does not
+  // have. Unavailable entries are reported separately rather than dropped: "this exists
+  // but not here, because the server lacks X" is the answer somebody needs, and silently
+  // omitting them reads as the manifest never having declared them.
+  const installed = servicePath === undefined ? null : readInstalledPackages(servicePath);
+  if (installed !== null) {
+    const gatedCommands = manifest.commands.filter((c) => !requirementsMet(c, installed).met);
+    const gatedQueries = manifest.queries.filter((q) => !requirementsMet(q, installed).met);
+    resolved.commands = manifest.commands.filter((c) => requirementsMet(c, installed).met);
+    resolved.queries = manifest.queries.filter((q) => requirementsMet(q, installed).met);
+    if (gatedCommands.length > 0 || gatedQueries.length > 0) {
+      resolved.unavailableHere = [...gatedCommands, ...gatedQueries].map((entry) => ({
+        name: entry.name,
+        needs: entry.requires ?? [],
+      }));
+      resolved.unavailableNote =
+        'Declared in the manifest but NOT on this server: it does not carry the mods these ' +
+        'need. Do not call them here — run them on a variant whose mods.lock has the ' +
+        'package, or add the package to this variant.';
+    }
+  }
 
   if (Array.isArray(maps)) {
     resolved.maps = maps;
@@ -87,7 +122,14 @@ export interface ServiceFamilies {
   displayName: string;
   /** Mid-game command surface: needs BOTH an rcon transport and a manifest. */
   commands:
-    | { available: true; commandCount: number; queryCount: number; unverified: number }
+    | {
+        available: true;
+        commandCount: number;
+        queryCount: number;
+        unverified: number;
+        /** Declared but not installed on THIS server — see `gatedNote`. */
+        gated: number;
+      }
     | { available: false; kind: 'drift' | 'no-transport' | 'no-manifest'; reason: string };
   worldSaves: boolean;
   contentPayload: boolean;
@@ -122,6 +164,7 @@ export function resolveFamilies(
     secretRefs: ReadonlyArray<{ containerEnvVar: string }>;
   },
   hasContentScripts: boolean,
+  servicePath?: string,
 ): ServiceFamilies {
   const manifest = getManifest(service);
   // Two independent preconditions, reported separately: a missing manifest is work
@@ -159,11 +202,18 @@ export function resolveFamilies(
       reason: 'rcon transport is configured but the service ships no rcon-manifest.json',
     };
   } else {
+    // Counted AFTER the per-service mod gate, or the one-line summary contradicts the
+    // detail it summarises: valheim-admin reported "35 commands" while the body listed 30
+    // and put the other 5 under unavailableHere. The summary is the part people scan, so
+    // it is the part that must not overstate what the server can do.
+    const installed = servicePath === undefined ? null : readInstalledPackages(servicePath);
+    const usable = manifest.commands.filter((c) => requirementsMet(c, installed).met);
     commands = {
       available: true,
-      commandCount: manifest.commands.length,
-      queryCount: manifest.queries.length,
-      unverified: manifest.commands.filter((c) => c.unverified).length,
+      commandCount: usable.length,
+      queryCount: manifest.queries.filter((q) => requirementsMet(q, installed).met).length,
+      unverified: usable.filter((c) => c.unverified).length,
+      gated: manifest.commands.length - usable.length,
     };
   }
 
@@ -184,8 +234,12 @@ export function formatFamilies(f: ServiceFamilies): string {
   const lines: string[] = [];
   if (f.commands.available) {
     const u = f.commands.unverified > 0 ? `, ${f.commands.unverified} unverified` : '';
+    const g =
+      f.commands.gated > 0
+        ? `, ${f.commands.gated} more need mods this server does not carry`
+        : '';
     lines.push(
-      `  mid-game commands  ${f.commands.commandCount} commands, ${f.commands.queryCount} queries${u}`,
+      `  mid-game commands  ${f.commands.commandCount} commands, ${f.commands.queryCount} queries${u}${g}`,
       `                     ${FAMILY_TOOLS.commands}`,
     );
   } else {
