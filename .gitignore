@@ -107,3 +107,7 @@ lab/s10-vscript/
 # Image builds compile from source (see the variant Dockerfile), so nothing
 # shipped depends on an artifact somebody built by hand.
 apps/*/plugins/build/
+
+# S11 build payload — the curated pack's assembled tree (355 MB), reproducible with
+# `git clone --depth 1 https://github.com/SNWCreations/l4d2-modded-server`.
+lab/s11-full-stack/payload/
