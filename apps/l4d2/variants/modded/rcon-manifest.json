@@ -1,0 +1,329 @@
+{
+  "displayName": "Left 4 Dead 2 (modded)",
+  "engine": "source",
+  "notes": "Source engine, rcon over TCP via the sidecar. The vanilla surface plus what the mods add. Every entry below was exercised against a live srcds 2.2.4.3 (build 9309) on the shipping modded image, 2026-08-30. TWO CONSTRAINTS THAT ARE NOT ERRORS, and they are different from each other: (1) All4Dead2's director commands run through FakeClientCommand, so they need A CLIENT PRESENT — on an empty server they throw `Client index 0 is invalid` and log a stack trace; with anyone connected, a bot included, they work. (2) a4d_spawn_item and a4d_spawn_weapon are a HARDER case and are absent here on purpose: they route through the `give` console command, which hard-refuses a console caller however many players are connected (S2). sm_rd_give exists because of that. The slot cvars are declared but LEFT AT STOCK: sv_maxplayers -1 restores the stock 4-player coop check, and sv_setmax (default 18) is the real client ceiling — raising sv_maxplayers past it advertises slots the engine cannot seat, which surfaces as players failing to connect. See docs/spikes/S2.md, S11-S15.",
+  "maps": "live",
+  "commands": [
+    {
+      "name": "change_map",
+      "description": "Load a campaign map (e.g. c1m1_hotel, c2m1_highway).",
+      "rcon": "map {map}",
+      "args": {
+        "map": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "name": "change_mode_and_map",
+      "description": "Set the game mode and load a map together.",
+      "rcon": "map {map} {mode}",
+      "args": {
+        "map": {
+          "type": "string"
+        },
+        "mode": {
+          "description": "coop | versus | survival | realism | scavenge"
+        }
+      }
+    },
+    {
+      "name": "kick_player",
+      "description": "Kick a player by name.",
+      "rcon": "kick \"{player}\"",
+      "args": {
+        "player": {}
+      },
+      "danger": true
+    },
+    {
+      "name": "kick_userid",
+      "description": "Kick by numeric userid (from the players query).",
+      "rcon": "kickid {userid}",
+      "args": {
+        "userid": {
+          "type": "int"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a message to everyone.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {}
+      }
+    },
+    {
+      "name": "set_join_password",
+      "description": "Set/clear the join password (empty clears).",
+      "rcon": "sv_password {password}",
+      "args": {
+        "password": {}
+      }
+    },
+    {
+      "name": "order_bots",
+      "mod": "respawn_director",
+      "description": "Order Left 4 Bots survivors. target: all | #<userid> | <name fragment>. type is one of L4B's twelve: carry follow lead scavenge goto wait deploy tempheal heal use destroy witch. Optional key=value: at=x,y,z (destination), look=x,y,z, ent=N, hold=seconds, pause=0|1. Positions are LITERAL world coordinates - use the ones the inbox captured at the moment the player spoke, not a fresh reading.",
+      "rcon": "sm_rd_order {target} {type} {options}",
+      "args": {
+        "target": {},
+        "type": {},
+        "options": {
+          "description": "space-separated key=value pairs, or empty"
+        }
+      }
+    },
+    {
+      "name": "cancel_bot_orders",
+      "mod": "respawn_director",
+      "description": "Drop queued orders. Optional type limits it to one order type.",
+      "rcon": "sm_rd_cancel {target} {type}",
+      "args": {
+        "target": {},
+        "type": {
+          "description": "an order type, or empty for all"
+        }
+      }
+    },
+    {
+      "name": "give_item",
+      "mod": "respawn_director",
+      "description": "Grant a weapon or item (entity name starts with weapon_ or upgrade_). A CHEAT, and off unless the operator set rd_allow_give 1 - the refusal names the switch. This exists because All4Dead2's own spawn commands can never be driven over rcon.",
+      "rcon": "sm_rd_give {item} {player}",
+      "args": {
+        "item": {},
+        "player": {
+          "description": "name fragment, or empty for the first human"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "force_panic",
+      "mod": "all4dead2",
+      "description": "Trigger a panic event. Needs a client present (see notes).",
+      "rcon": "a4d_force_panic"
+    },
+    {
+      "name": "force_tank",
+      "mod": "all4dead2",
+      "description": "Have the director place a Tank. Director-placed and therefore slow to arrive - unlike a spawn, which is instant and local.",
+      "rcon": "a4d_force_tank"
+    },
+    {
+      "name": "force_witch",
+      "mod": "all4dead2",
+      "description": "Have the director place a Witch. Director-placed and slow, as force_tank.",
+      "rcon": "a4d_force_witch"
+    },
+    {
+      "name": "add_zombies",
+      "mod": "all4dead2",
+      "description": "Add common infected to the current horde.",
+      "rcon": "a4d_add_zombies {count}",
+      "args": {
+        "count": {
+          "type": "int"
+        }
+      }
+    },
+    {
+      "name": "spawn_infected",
+      "mod": "all4dead2",
+      "description": "Spawn a special infected instantly at the caller's position. Instant and local, unlike the force_* commands.",
+      "rcon": "a4d_spawn_infected {class}",
+      "args": {
+        "class": {
+          "description": "smoker | boomer | hunter | spitter | jockey | charger | tank | witch"
+        }
+      }
+    },
+    {
+      "name": "panic_forever",
+      "mod": "all4dead2",
+      "description": "Panic events without end. Undo with reset_director.",
+      "rcon": "a4d_panic_forever {enabled}",
+      "args": {
+        "enabled": {
+          "description": "1 | 0"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "continuous_bosses",
+      "mod": "all4dead2",
+      "description": "Bosses without end. Undo with reset_director.",
+      "rcon": "a4d_continuous_bosses {enabled}",
+      "args": {
+        "enabled": {
+          "description": "1 | 0"
+        }
+      },
+      "danger": true
+    },
+    {
+      "name": "reset_director",
+      "mod": "all4dead2",
+      "description": "One-call undo for everything above, including panic_forever and continuous_bosses. This command is the entire reason this build keeps AtomicStryker's All4Dead2 rather than the more popular fork, which drops it (S11).",
+      "rcon": "a4d_reset_to_defaults"
+    }
+  ],
+  "queries": [
+    {
+      "name": "players",
+      "description": "Connected players: userid, name, steamid, and the current map.",
+      "rcon": "status",
+      "singles": {
+        "hostname": "^hostname\\s*:\\s*(.+)$",
+        "map": "^map\\s*:\\s*(\\S+)",
+        "playerCount": "^players\\s*:\\s*(.+)$"
+      },
+      "row": {
+        "match": "^#\\s*(?:\\d+\\s+)?(\\d+)\\s+\"([^\"]*)\"\\s+(STEAM_\\S+|BOT|\\[U:\\S+)?",
+        "fields": [
+          "userid",
+          "name",
+          "steamid"
+        ],
+        "skipIf": "^#\\s*userid"
+      }
+    },
+    {
+      "name": "bot_inbox",
+      "description": "Drain player messages addressed to the bots (chat prefixed with @). Each carries the speaker's eye position and aim point FROZEN at the moment they spoke, which is the whole reason the plugin captures rather than the agent asking later. AT-MOST-ONCE: reading clears the buffer.",
+      "rcon": "sm_rd_inbox",
+      "singles": {
+        "count": "^INBOX\\|(\\d+)$"
+      },
+      "row": {
+        "match": "^MSG\\|(\\d+)\\|([^|]*)\\|([^|]*)\\|tag=([^|]*)\\|to=([^|]*)\\|at=([^|]*)\\|aim=([^|]*)\\|(.*)$",
+        "fields": [
+          "userid",
+          "name",
+          "steamid",
+          "tag",
+          "resolvedTarget",
+          "eyePos",
+          "aimPos",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "bot_status",
+      "description": "Bots, humans, and whether an order can be placed at all. orders_ready reports whether Left4Bots is loaded and running a mode - NOT whether a human is connected, which v3 does not need.",
+      "rcon": "sm_rd_status",
+      "singles": {
+        "humans": "\\|humans=(\\d+)",
+        "bots": "\\|bots=(\\d+)",
+        "botNames": "\\|botnames=([^|]*)",
+        "ordersReady": "\\|orders_ready=(\\d)",
+        "inbox": "\\|inbox=(\\d+)"
+      }
+    },
+    {
+      "name": "bot_orders",
+      "description": "Each bot's order queue and what it is currently acting on. An order being ACCEPTED and an order being acted on are different facts; this reports the second.",
+      "rcon": "sm_rd_orders all",
+      "row": {
+        "match": "^ORDERS\\|bot=([^|]*)\\|userid=(\\d+)\\|(\\d+)\\|(.*)$",
+        "fields": [
+          "name",
+          "userid",
+          "queueLength",
+          "currentOrder"
+        ]
+      }
+    },
+    {
+      "name": "scene",
+      "description": "Tactical readout anchored on the first human: campaign progress, the director's own intensity, every survivor's health and threat state, each special infected with bearing and whether it is closing, and the common horde as a count plus its nearest member. Needs a human connected.",
+      "rcon": "sm_rd_scene",
+      "singles": {
+        "flow": "^SCENE\\|flow=([^|]*)",
+        "intensity": "\\|intensity=([\\d.]+)",
+        "commons": "^MOB\\|commons=(\\d+)",
+        "nearestCommon": "\\|nearest=(-?\\d+)",
+        "topThreat": "^TOP\\|([^|]*)"
+      },
+      "row": {
+        "match": "^SI\\|([^|]*)\\|dist=(\\d+)\\|bearing=(-?\\d+)\\|closing=(\\d)\\|rank=(\\d+)$",
+        "fields": [
+          "class",
+          "distance",
+          "bearing",
+          "closing",
+          "threatRank"
+        ]
+      }
+    }
+  ],
+  "cvars": [
+    {
+      "name": "z_difficulty",
+      "description": "Difficulty: Easy, Normal, Hard, Impossible.",
+      "default": "Normal",
+      "values": [
+        "Easy",
+        "Normal",
+        "Hard",
+        "Impossible"
+      ]
+    },
+    {
+      "name": "sv_alltalk",
+      "description": "Everyone hears each other's voice.",
+      "default": "0",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "sv_maxplayers",
+      "mod": "l4dtoolz",
+      "description": "Max HUMAN players. -1 disables the override and restores the stock 4-player coop check. Bounded at 31 upstream because above that crashes since The Last Stand. Must not exceed sv_setmax.",
+      "default": "-1",
+      "range": [
+        -1,
+        31
+      ]
+    },
+    {
+      "name": "sv_setmax",
+      "mod": "l4dtoolz",
+      "description": "Engine max CLIENTS - the real ceiling, and the one people forget. Default 18. Takes effect live over rcon despite upstream documenting only the launch-option form.",
+      "default": "18",
+      "range": [
+        18,
+        32
+      ]
+    },
+    {
+      "name": "sv_visiblemaxplayers",
+      "mod": "l4dtoolz",
+      "description": "The slot count ADVERTISED to server browsers, and nothing else. It does not change how many can join.",
+      "default": "-1"
+    },
+    {
+      "name": "rd_allow_give",
+      "mod": "respawn_director",
+      "description": "Allow the agent to grant weapons and items (a cheat). Off by default: a player can ask and the agent may simply be agreeable, and neither of those is a control.",
+      "default": "0",
+      "values": [
+        "0",
+        "1"
+      ]
+    },
+    {
+      "name": "rd_prefix",
+      "mod": "respawn_director",
+      "description": "Chat prefix marking a message as addressed to the bots. Filtering server-side keeps ordinary table talk out of the agent's context.",
+      "default": "@"
+    }
+  ]
+}
