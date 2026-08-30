@@ -1,0 +1,42 @@
+# Thunderstore packages installed on the modded server, one per line:
+#
+#   <namespace>/<package> <version>
+#
+# Tracked, because unlike a world save the mod set IS reproducible — this file is the
+# source of truth and mods/ is a rebuildable payload, the same relationship maps.txt has
+# with content/ in apps/tfc/variants/modded.
+#
+#   pnpm valheim:mods:fetch            rebuild mods/ from this file
+#   pnpm valheim:mods:publish          upload mods/ to the server's plugin prefix
+#
+# BepInEx itself is NOT listed here. The image installs BepInExPack Valheim when
+# GAME_ENV_BEPINEX=true and would fight a second copy dropped into plugins/.
+#
+# THREE THINGS TO KNOW BEFORE ADDING A LINE:
+#
+#  1. Every client must run the SAME set at the SAME versions or they cannot connect.
+#     Pin exact versions here and hand players the matching r2modman/Thunderstore
+#     modpack code — "latest" on both ends is not the same thing as "the same".
+#
+#  2. A mod that adds prefabs (items, creatures, buildables) changes the WORLD, not just
+#     the session. Removing it later makes Valheim destroy every object it created, and
+#     that damage is usually unrepairable. Adding one is close to a one-way door for the
+#     world it runs on — snapshot the world under a new name first.
+#
+#  3. Mods and crossplay are mutually exclusive. With crossplay on, Valheim uses PlayFab
+#     networking, BepInEx cannot hook it, and plugins silently do not load.
+#
+# Empty is a valid and deployable state: BepInEx loads with no plugins, the server runs
+# vanilla behaviour, and worlds that run here are still stamped `modded` — which is
+# correct, because the point of the stamp is where a save has BEEN, not what it met.
+
+# <namespace>/<package> <version> [world-safe]
+#
+# `world-safe` asserts the plugin writes NO prefabs into the save — admin, UI or server
+# behaviour only. It is an assertion, not something derivable from a .dll, so the default
+# is unsafe and one unlisted plugin makes the whole run world-altering. It is recorded in
+# every world's stamp, so the claim is auditable after the fact.
+#
+# ValheimRcon is what makes mid-game admin possible at all: vanilla Valheim has no remote
+# console. It adds a listener and executes commands; nothing it does reaches the save.
+Tristan/ValheimRcon 1.5.1 world-safe

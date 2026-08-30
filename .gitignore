@@ -78,3 +78,18 @@ apps/respawn-mcp/src/manifests.generated.ts
 # reproducible from the archive with `pnpm tfc:content:fetch` and are still captured
 # by the image content hash, because Docker's build context ignores .gitignore.
 apps/*/variants/*/content/
+
+# World-save library for services whose state round-trips through S3 (valheim).
+# Gitignored for size, but UNLIKE apps/*/variants/*/content/ these are NOT
+# reproducible: a world is live state, not content fetched from an archive, and
+# this directory is its master copy. Back it up somewhere that is not this repo.
+#
+# The .respawn.json provenance stamps inside are small and ARE meaningful in review —
+# but they are meaningless without the save they describe, so they stay with it.
+apps/*/worlds/
+apps/*/variants/*/worlds/
+
+# BepInEx plugin payloads. Reproducible from the variant's tracked mods.txt with
+# `pnpm valheim:mods:fetch <variant>`, so this is the content/ relationship, not the
+# worlds/ one.
+apps/*/variants/*/mods/

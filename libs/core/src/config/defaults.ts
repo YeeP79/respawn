@@ -83,6 +83,23 @@ export const DEFAULT_MYSQL = {
   backupIntervalSeconds: 300,
 } as const;
 
+/**
+ * World-sync sidecar: off unless a service both keeps its state on a volume and wants
+ * that state rotatable from outside the VPC. `worlds_local` is Valheim's own layout.
+ */
+export const DEFAULT_WORLD_SYNC = {
+  enabled: false,
+  worldSubdir: 'worlds_local',
+  syncIntervalSeconds: 300,
+  seedForce: false,
+  // Never create a world implicitly: an unknown name is far more often a typo or an
+  // unstaged save than a request for a new world.
+  allowCreate: false,
+} as const;
+
+/** The two server kinds a save can be stamped with. */
+export const WORLD_FLAVORS = ['vanilla', 'modded'] as const;
+
 export const DEFAULT_RCON_CONTROL: RconControlConfig = {
   enabled: false,
   protocol: 'goldsrc',

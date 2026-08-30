@@ -42,9 +42,13 @@ import {
   getManifest,
   manifestedServices,
   resolveCapabilities,
+  resolveFamilies,
+  formatFamilies,
+  type ServiceFamilies,
 } from './capabilities.js';
 import { resolveCvarCommand, resolveWireCommand } from './manifest.js';
 import { runQuery } from './query-engine.js';
+import { readLibrary, inGameDays, divergence, unmoddedOutlook, type LibraryWorld } from './worlds.js';
 import {
   parseTravelContext,
   applyMutatorChanges,
@@ -61,6 +65,7 @@ import {
   destroy as coreDestroy,
   scale as coreScale,
   secretExists,
+  readSecret,
   setSecret,
   type ActionResult,
   type DiscoveredService,
@@ -112,6 +117,12 @@ const SCALE_ALLOWED = DEPLOYS_ALLOWED || process.env['RESPAWN_ALLOW_SCALE'] === 
 const DESTROY_ALLOWED = process.env['RESPAWN_ALLOW_DESTROY'] === 'true';
 /** Secrets are written, never read back, unless this is set. See generate_secret. */
 const SECRET_WRITES_ALLOWED = process.env['RESPAWN_ALLOW_SECRET_WRITES'] === 'true';
+// Reading a secret VALUE gets its own gate rather than reusing the write one. Write
+// access does not imply read access here: generate_secret mints a random value and does
+// not return it, so someone holding it can replace a secret but cannot learn the one
+// already stored. Folding disclosure into the write gate would quietly grant a
+// capability nobody chose.
+const SECRET_REVEAL_ALLOWED = process.env['RESPAWN_ALLOW_SECRET_REVEAL'] === 'true';
 
 /** Zod schema for the deploy environment, shared by the lifecycle tools. */
 const environmentSchema = z
@@ -142,6 +153,15 @@ function actionResult(result: ActionResult) {
   return textResult(
     `${result.success ? '✓' : '✗'} ${result.serviceName} ${result.action}: ${result.message}`,
     !result.success,
+  );
+}
+
+/** A service's tool families, with content tooling resolved off the filesystem. */
+function familiesFor(svc: DiscoveredService): ServiceFamilies {
+  return resolveFamilies(
+    svc.name,
+    svc.config,
+    resolveServiceScript(svc.path, 'check-content') !== null,
   );
 }
 
@@ -211,13 +231,61 @@ async function runAndFormat(service: string, command: string, opts: { write?: bo
  * name the fix; re-wording them here would mean two descriptions of the same failure
  * drifting apart.
  */
+/**
+ * A service's script, from its own `scripts/` dir or — for a variant — its project's.
+ *
+ * Variants of one project usually share tooling: apps/valheim's world scripts are
+ * identical for `vanilla` and `valheim-modded` and take the variant as an argument, so
+ * duplicating them per variant would mean two copies drifting apart. Falls back rather
+ * than replacing, so a variant can still override with its own copy.
+ */
+function resolveServiceScript(servicePath: string, scriptName: string): string | null {
+  const own = path.join(servicePath, 'scripts', `${scriptName}.sh`);
+  if (fs.existsSync(own)) return own;
+  // <project>/variants/<variant> -> <project>
+  const shared = path.join(servicePath, '..', '..', 'scripts', `${scriptName}.sh`);
+  return fs.existsSync(shared) ? shared : null;
+}
+
+/** The variant segment of a service path, or null for a flat project. */
+function variantOf(servicePath: string): string | null {
+  const parts = servicePath.split(path.sep);
+  return parts.length >= 2 && parts[parts.length - 2] === 'variants'
+    ? parts[parts.length - 1]!
+    : null;
+}
+
+/**
+ * Runs one of the shared world-save scripts for a variant service.
+ *
+ * Every one of them takes the VARIANT first — the save library, the S3 prefix and the
+ * modded/vanilla flavor are all per-variant, and a service that is not a variant has no
+ * world library at all, so that is an error rather than a default.
+ */
+async function runWorldScript(
+  svc: DiscoveredService,
+  scriptName: string,
+  args: string[],
+): Promise<{ exitCode: number; output: string }> {
+  const variant = variantOf(svc.path);
+  if (!variant) {
+    return {
+      exitCode: 127,
+      output:
+        `${svc.name} is not a variant service, so it has no per-variant world library. ` +
+        `World tooling lives at apps/<project>/scripts and is addressed by variant.`,
+    };
+  }
+  return runContentScript(svc.path, scriptName, [variant, ...args]);
+}
+
 async function runContentScript(
   servicePath: string,
   scriptName: string,
   args: string[],
 ): Promise<{ exitCode: number; output: string }> {
-  const script = path.join(servicePath, 'scripts', `${scriptName}.sh`);
-  if (!fs.existsSync(script)) {
+  const script = resolveServiceScript(servicePath, scriptName);
+  if (!script) {
     return {
       exitCode: 127,
       output:
@@ -281,16 +349,29 @@ server.registerTool(
   },
   async ({ service }) => {
     if (!getManifest(service)) {
-      const known = manifestedServices().join(', ') || '(none)';
+      // Deliberately NOT an error. Nothing is broken: `valheim` has no remote console at
+      // all, so "no manifest" there is a category fact about the game, not a missing
+      // file. Returning isError made a fully working service read as misconfigured, and
+      // sent the reader looking for a manifest to write that could never help.
+      const svc = resolveConfiguredService(service, 'dev');
+      const f = familiesFor(svc);
       return textResult(
-        `No options manifest for "${service}". Servers with a manifest: ${known}.`,
-        true,
+        `${service} (${f.displayName}) — no rcon manifest, so the command/cvar tools ` +
+          `have nothing to resolve.\n\nWhat applies to this service:\n${formatFamilies(f)}\n\n` +
+          `Services shipping a manifest: ${manifestedServices().join(', ') || '(none)'}.`,
       );
     }
     // A running target lets us fill in live maps; absence is fine (degrades).
     const target = await findTarget(service);
     const caps = await resolveCapabilities(service, target);
-    return textResult(JSON.stringify(caps, null, 2));
+    // The family summary goes on BOTH branches. It used to exist only where a manifest
+    // was missing, so the services with the richest surface were the ones told least
+    // about it — a manifested service never learned that world saves or secrets applied.
+    const f = familiesFor(resolveConfiguredService(service, 'dev'));
+    return textResult(
+      `${service} (${f.displayName}) — tool families:\n${formatFamilies(f)}\n\n` +
+        `Command/cvar detail:\n${JSON.stringify(caps, null, 2)}`,
+    );
   },
 );
 
@@ -939,17 +1020,38 @@ server.registerTool(
   },
 );
 
+/**
+ * Every log stream prefix the CDK constructs emit, so `server_logs` can filter to any
+ * container the fleet actually runs.
+ *
+ * MUST track the `streamPrefix` values in apps/respawn/src/constructs/*.ts. A prefix
+ * missing here is not a visible error — the container's logs are still IN the group, so
+ * an unfiltered read shows them and only the filter is impossible. That is how
+ * `world-sync` ended up unfilterable: the sidecar was added and this list was not, and
+ * nothing failed to say so.
+ */
+const LOG_CONTAINERS = [
+  'game-server',
+  'rcon-control',
+  'idle-shutdown',
+  'world-sync',
+  'mysql',
+  'mysql-backup',
+  'redis',
+] as const;
+
 server.registerTool(
   'server_logs',
   {
     title: 'Server logs',
     description:
-      'Tail a game server\'s CloudWatch logs, optionally filtered to one container ' +
-      '(game-server, rcon-control, idle-shutdown) and a search pattern. The companion ' +
-      'to server_health when a task stopped and you need to know why.',
+      "Tail a game server's CloudWatch logs, optionally filtered to one container and a " +
+      `search pattern. Containers: ${LOG_CONTAINERS.join(', ')} — only those a service ` +
+      'actually runs will have streams. The companion to server_health when a task ' +
+      'stopped and you need to know why.',
     inputSchema: {
       service: z.string(),
-      container: z.enum(['game-server', 'rcon-control', 'idle-shutdown']).optional(),
+      container: z.enum(LOG_CONTAINERS).optional(),
       minutes: z.number().int().min(1).max(1440).optional().describe('Relative lookback, default 30'),
       since: z
         .string()
@@ -1281,6 +1383,437 @@ server.registerTool(
     args.push('--clear', '--yes');
     const r = await runContentScript(svc.path, 'publish-fastdl', args);
     return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+
+// --- World-save lifecycle -------------------------------------------------------
+//
+// A world save is the only artifact in the fleet that cannot be regenerated: there is no
+// manifest to refetch it from, and Valheim writes objects as a continuous stream, so a
+// corrupted one is usually unrepairable. Every tool here therefore reports the shell
+// script's output VERBATIM — the scripts already refuse, explain and name the fix, and
+// re-wording them here would mean two descriptions of the same refusal drifting apart.
+
+server.registerTool(
+  'world_status',
+  {
+    title: 'World save status',
+    description:
+      "Report every copy of every world for a service: the local library (with each " +
+      "save's in-game clock and its vanilla/modded provenance stamp), what is STAGED in " +
+      "S3 for the next start, and what the server has MIRRORED back. Ends with a verdict " +
+      'saying which side is ahead. Read-only and always available. Run it BEFORE ' +
+      'publishing (a stale push discards played progress) and BEFORE rotating. An ' +
+      'unreachable bucket is reported as UNKNOWN, never as "nothing staged".',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim" or "valheim-modded"'),
+      environment: environmentSchema,
+    },
+  },
+  async ({ service, environment }) => {
+    const svc = resolveConfiguredService(service, environment);
+    const args: string[] = [''];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    const r = await runWorldScript(svc, 'check-content', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'publish_world',
+  {
+    title: 'Stage a world save for the next start',
+    description:
+      "Upload a world from the service's local library to its S3 inbox. The sidecar " +
+      'installs it at the next task start and then clears the inbox, so this is a ' +
+      'handoff, not a setting — the running server keeps playing whatever it booted on ' +
+      'until it restarts. REFUSED if the server has been played since your local copy ' +
+      '(that would discard progress), or if the save has ever run MODDED and the target ' +
+      'is a vanilla server (that would destroy every object its mods created, ' +
+      'permanently). Requires RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim"'),
+      environment: environmentSchema,
+      world: z.string().describe('World name as it appears in the library, e.g. "respawn-world"'),
+      force: z
+        .boolean()
+        .optional()
+        .describe('Publish even though the server is ahead — a deliberate rollback that discards played progress.'),
+      assumeVanilla: z
+        .boolean()
+        .optional()
+        .describe('Assert an UNSTAMPED save has never run modded. Only for a save whose history you know.'),
+    },
+  },
+  async ({ service, environment, world, force, assumeVanilla }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult(
+        'Publishing a world is disabled. Set RESPAWN_ALLOW_DEPLOYS=true. world_status is ' +
+          'read-only and always available.',
+        true,
+      );
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const args = [world];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    if (force) args.push('--force');
+    if (assumeVanilla) args.push('--assume-vanilla');
+    const r = await runWorldScript(svc, 'publish-world', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'pull_world',
+  {
+    title: 'Pull the played world back',
+    description:
+      "Download the server's mirrored world into the local library — the half that makes " +
+      'rotation safe, because the mirror is the ONLY copy carrying the session\'s ' +
+      'progress. Rotating to a different world without pulling first discards everything ' +
+      'played. The copy being replaced is kept under worlds/.previous/. Refuses if your ' +
+      'local copy is ahead of the server\'s. `clear` also empties the S3 copies ' +
+      'afterwards, and only ever runs after a verified download.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim"'),
+      environment: environmentSchema,
+      world: z.string().describe('World name, e.g. "respawn-world"'),
+      force: z.boolean().optional().describe('Overwrite a local copy that is ahead of the server\'s.'),
+      clear: z
+        .boolean()
+        .optional()
+        .describe('Empty the S3 copies after a verified download. Requires RESPAWN_ALLOW_DEPLOYS=true.'),
+    },
+  },
+  async ({ service, environment, world, force, clear }) => {
+    if (clear && !DEPLOYS_ALLOWED) {
+      return textResult(
+        'clear deletes from S3 and is disabled. Set RESPAWN_ALLOW_DEPLOYS=true, or pull ' +
+          'without clear — the download itself is not gated.',
+        true,
+      );
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const args = [world];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    if (force) args.push('--force');
+    if (clear) args.push('--clear');
+    const r = await runWorldScript(svc, 'pull-world', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'clear_world',
+  {
+    title: 'Empty a world from S3',
+    description:
+      "Remove a world's staged and mirrored copies from S3 after a session. Housekeeping " +
+      'rather than an exposure fix (the bucket is private) — what it prevents is a stale ' +
+      'mirror being pulled down months later and treated as current. REFUSES unless the ' +
+      'local library already holds a copy at least as new, because the mirror is ' +
+      'otherwise the only record of the session. Does NOT remove the world from the ' +
+      "server's volume, and a running task re-mirrors it within the sync interval — " +
+      'scale to 0 first if the bucket must stay empty. Requires RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim"'),
+      environment: environmentSchema,
+      world: z.string().describe('World name, e.g. "respawn-world"'),
+      confirm: z.string().describe('Must equal the world name.'),
+    },
+  },
+  async ({ service, environment, world, confirm }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Clearing a world is disabled. Set RESPAWN_ALLOW_DEPLOYS=true.', true);
+    }
+    if (confirm !== world) {
+      return textResult(
+        `confirm must equal the world name. Got "${confirm}", expected "${world}". Nothing was deleted.`,
+        true,
+      );
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const args = [world];
+    if (svc.config.aws.profile) args.push(svc.config.aws.profile);
+    args.push('--yes');
+    const r = await runWorldScript(svc, 'clear-world', args);
+    return textResult(r.output || '(no output)', r.exitCode !== 0);
+  },
+);
+
+server.registerTool(
+  'switch_world',
+  {
+    title: 'Switch which world the server runs',
+    description:
+      'Deploy the service with a different world selected. The world name IS the save ' +
+      'file name, so this points the server at a different save; the world-sync sidecar ' +
+      'follows the same value, which is what keeps the running world and the mirrored ' +
+      'one the same file. Worlds ACCUMULATE on the volume by name, so switching back to ' +
+      'one that has already run here needs no S3 round trip at all. This REPLACES the ' +
+      'task and restarts the server — an in-progress session ends. Pull the current ' +
+      "world first if its progress matters (the sidecar's shutdown mirror is best-effort: " +
+      'a task killed without SIGTERM never runs it). Requires RESPAWN_ALLOW_DEPLOYS=true.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim"'),
+      environment: environmentSchema,
+      world: z.string().describe('World name to switch to, e.g. "respawn-world-archive"'),
+    },
+  },
+  async ({ service, environment, world }) => {
+    if (!DEPLOYS_ALLOWED) {
+      return textResult('Switching worlds redeploys the service and is disabled. Set RESPAWN_ALLOW_DEPLOYS=true.', true);
+    }
+    const svc = resolveConfiguredService(service, environment);
+    const variant = variantOf(svc.path);
+    if (!variant) {
+      return textResult(`${service} is not a variant service and has no world library.`, true);
+    }
+    // Refuse a name the library does not have. Deploying an unknown world does not fail:
+    // Valheim CREATES a new empty world of that name and happily runs it, so a typo
+    // silently replaces the session with a fresh spawn rather than erroring.
+    const worldDir = path.join(svc.path, 'worlds', world);
+    if (!fs.existsSync(path.join(worldDir, `${world}.db`))) {
+      const dir = path.join(svc.path, 'worlds');
+      const have = fs.existsSync(dir)
+        ? fs.readdirSync(dir).filter((d) => !d.startsWith('.')).join(', ') || '(none)'
+        : '(no library)';
+      return textResult(
+        `${service} has no world "${world}" in its library. Have: ${have}.\n` +
+          `Deploying an unknown name does not fail — Valheim creates a NEW empty world ` +
+          `and runs it, so this is refused rather than risked. Note the library lists ` +
+          `only worlds that have passed through this machine; the volume may hold others.`,
+        true,
+      );
+    }
+    return actionResult(
+      await coreDeploy({
+        ...actionContext(svc, environment),
+        requireApproval: 'never',
+        gameEnvOverrides: { WORLD_NAME: world },
+      }),
+    );
+  },
+);
+
+
+server.registerTool(
+  'reveal_secret',
+  {
+    title: 'Read a secret value',
+    description:
+      "Return the plaintext of one of a service's SECRET_REFS — for a value a HUMAN has " +
+      'to use, such as the join password players type. PUTS THE VALUE IN THIS ' +
+      'TRANSCRIPT, so call it when someone actually needs the value, not to check a ' +
+      "secret exists: check_secrets answers that without disclosing anything. Requires " +
+      'RESPAWN_ALLOW_SECRET_REVEAL=true, which is deliberately separate from the write ' +
+      'gate — generate_secret mints a random value and does not return it, so being able ' +
+      'to replace a secret does not imply being able to learn the stored one.',
+    inputSchema: {
+      service: z.string().describe('Service name, e.g. "valheim-modded"'),
+      secret: z.string().describe('Container env var name from SECRET_REFS, e.g. "SERVER_PASS"'),
+      environment: environmentSchema,
+    },
+  },
+  async ({ service, secret, environment }) => {
+    if (!SECRET_REVEAL_ALLOWED) {
+      return textResult(
+        'Reading secret values is disabled. Set RESPAWN_ALLOW_SECRET_REVEAL=true in the ' +
+          "MCP server's env to enable it. check_secrets reports presence without " +
+          'disclosing anything and is always available.',
+        true,
+      );
+    }
+    const config = resolveConfiguredService(service, environment).config;
+    const ref = config.secretRefs.find((r) => r.containerEnvVar === secret);
+    if (!ref) {
+      const known = config.secretRefs.map((r) => r.containerEnvVar).join(', ') || '(none)';
+      return textResult(
+        `${service} declares no SECRET_REFS entry named "${secret}". Has: ${known}.`,
+        true,
+      );
+    }
+    const value = await readSecret({
+      store: ref.store,
+      sourceId: ref.sourceId,
+      ...(ref.jsonKey ? { jsonKey: ref.jsonKey } : {}),
+      region: config.aws.region ?? REGION,
+      ...(PROFILE ? { profile: PROFILE } : {}),
+    });
+    if (value === undefined) {
+      return textResult(
+        `${secret} -> ${ref.store}:${ref.sourceId} could not be read. It may not exist ` +
+          `yet (check_secrets confirms), or the profile may lack permission. Secrets are ` +
+          `per account AND per region.`,
+        true,
+      );
+    }
+    return textResult(`${service} ${secret} (${ref.store}:${ref.sourceId}):\n\n${value}`);
+  },
+);
+
+
+server.registerTool(
+  'list_services',
+  {
+    title: 'List every configured service and what applies to it',
+    description:
+      'Every service configured in the repo, with the tool families each supports. ' +
+      'DIFFERENT FROM list_servers, which shows only servers that are RUNNING and ' +
+      'rcon-capable — a service that is scaled to zero, or that has no remote console at ' +
+      'all, appears here and nowhere else. Start here when you do not already know a ' +
+      "service's name or how it is administered. Read-only.",
+    inputSchema: {
+      environment: environmentSchema,
+      detail: z
+        .boolean()
+        .default(false)
+        .describe('Expand every family per service instead of a one-line summary.'),
+    },
+  },
+  async ({ environment, detail }) => {
+    const services = discoverServices(WORKSPACE_ROOT, environment).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    if (services.length === 0) return textResult('No configured services found.', true);
+
+    const out: string[] = [`${services.length} configured service(s) in ${environment}:`, ''];
+    for (const svc of services) {
+      const f = familiesFor(svc);
+      if (detail) {
+        out.push(`${f.service} (${f.displayName})`, formatFamilies(f), '');
+      } else {
+        const tags: string[] = [];
+        // Drift gets its own token rather than folding into "none". The summary is what
+        // people scan, so a manifest that exists and cannot be reached has to be visible
+        // HERE — hiding it behind a per-service call defeats the point of the listing.
+        tags.push(
+          f.commands.available
+            ? `commands:${f.commands.commandCount}`
+            : f.commands.kind === 'drift'
+              ? 'commands:UNREACHABLE(drift)'
+              : f.commands.kind === 'no-manifest'
+                ? 'commands:no-manifest'
+                : 'commands:none',
+        );
+        if (f.worldSaves) tags.push('world-saves');
+        if (f.contentPayload) tags.push('content');
+        if (f.persistentMountPath) tags.push('persistent');
+        if (f.idleShutdown) tags.push('idle-scale-0');
+        if (f.secrets.length > 0) tags.push(`secrets:${f.secrets.length}`);
+        out.push(`  ${f.service.padEnd(16)} ${tags.join('  ')}`);
+      }
+    }
+    out.push(
+      '',
+      'Every service also supports lifecycle (synth/diff/deploy/push/scale/check_updates) ' +
+        'and observability (server_health/server_logs/server_metrics/container_stats).',
+      'commands:none means no mid-game command surface — get_server_options says whether ' +
+        'that is a missing manifest or a game with no remote console at all.',
+    );
+    return textResult(out.join('\n'));
+  },
+);
+
+
+server.registerTool(
+  'list_worlds',
+  {
+    title: 'What worlds do we have',
+    description:
+      'Every world save in every service\'s local library, with its in-game age, ' +
+      'save-format version and vanilla/modded provenance. THE ANSWER TO "which worlds do ' +
+      'we have" — start here before publish_world or switch_world, which both need a name ' +
+      'you can only get from somewhere.\n\n' +
+      'Reads local disk only: no AWS calls, no credentials, instant, and it still works ' +
+      'when your SSO session has expired — unlike world_status, which needs S3 and reports ' +
+      'UNKNOWN when it cannot reach it. Use world_status instead when the question is ' +
+      '"has the server been played since my copy", which this cannot answer.',
+    inputSchema: {
+      environment: environmentSchema,
+      service: z
+        .string()
+        .optional()
+        .describe('Limit to one service. Omit for every service that keeps worlds.'),
+    },
+  },
+  async ({ environment, service }) => {
+    const services = discoverServices(WORKSPACE_ROOT, environment)
+      .filter((s) => s.config.worldSync.enabled)
+      .filter((s) => service === undefined || s.name === service)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (services.length === 0) {
+      return textResult(
+        service !== undefined
+          ? `${service} does not keep a world library (ENABLE_WORLD_SYNC is off, or no such service).`
+          : 'No service keeps a world library.',
+        true,
+      );
+    }
+
+    const all: LibraryWorld[] = services.flatMap((s) => readLibrary(s.path, s.name));
+    if (all.length === 0) {
+      return textResult(
+        `No worlds in ${services.map((s) => s.name).join(', ')}. Pull one from a server ` +
+          'with pull_world, or place a save in the service\'s worlds/ directory.',
+      );
+    }
+
+    // Grouped by NAME rather than by service: "which worlds do we have" is a question
+    // about worlds, and the same save living in two libraries is one world, not two.
+    const byName = new Map<string, LibraryWorld[]>();
+    for (const w of all) {
+      const list = byName.get(w.name) ?? [];
+      list.push(w);
+      byName.set(w.name, list);
+    }
+
+    const lines: string[] = [
+      `${byName.size} world(s) across ${services.length} service librar${services.length === 1 ? 'y' : 'ies'}:`,
+      '',
+    ];
+    for (const [name, copies] of [...byName].sort(([a], [b]) => a.localeCompare(b))) {
+      const first = copies[0]!;
+      const flavor = first.flavor ?? 'unstamped';
+      const mb = (first.bytes / 1024 / 1024).toFixed(1);
+      lines.push(
+        `  ${name}`,
+        `      ${inGameDays(first.netTime).toFixed(1)} in-game days   save v${first.version}   ${mb} MB   [${flavor}]`,
+        `      in: ${copies.map((c) => c.service).join(', ')}`,
+      );
+      if (first.mods.length > 0) {
+        // Annotated, because the bare list does not say which of them threaten a later
+        // vanilla load — and that is the only reason the list matters operationally.
+        const annotated = first.mods.map((m) => {
+          if (first.modsWorldSafe.includes(m)) return `${m} (world-safe)`;
+          if (first.modsWorldAltering.includes(m)) return `${m} (world-altering)`;
+          return m;
+        });
+        lines.push(`      mods run: ${annotated.join(', ')}`);
+      }
+      // Phrased as a consequence, not a capability: a modded save DOES load on a vanilla
+      // server, it just deletes what the mods built. "Can it run" is the wrong question.
+      const outlook = unmoddedOutlook(first);
+      lines.push(`      without mods: ${outlook.verdict} — ${outlook.detail}`);
+      for (const c of copies.filter((x) => !x.complete)) {
+        lines.push(`      ! ${c.service}: .db with no .fwl — will not load`);
+      }
+      const diverged = divergence(copies);
+      if (diverged) {
+        lines.push(`      ! COPIES DISAGREE on ${diverged}:`);
+        for (const c of copies) {
+          lines.push(`          ${c.service}: save v${c.version}, ${inGameDays(c.netTime).toFixed(1)} days`);
+        }
+      }
+      lines.push('');
+    }
+    lines.push(
+      'Local libraries only — this says nothing about what a server is currently running.',
+      'world_status <service> compares these against S3; switch_world picks one to run.',
+    );
+    return textResult(lines.join('\n'));
   },
 );
 

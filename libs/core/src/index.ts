@@ -5,7 +5,7 @@
 export * from './config/types.js';
 export * from './config/defaults.js';
 export * from './config/preflight.js';
-export { loadConfig } from './config/loader.js';
+export { loadConfig, resolveWorldName } from './config/loader.js';
 export * from './naming.js';
 export * from './aws/exec.js';
 export * from './aws/identity.js';

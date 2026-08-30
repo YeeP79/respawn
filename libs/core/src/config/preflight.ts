@@ -61,6 +61,53 @@ export function findUnsatisfiedRequirements(
   });
 }
 
+/**
+ * Names the world a deploy will run, or undefined when nothing chose one.
+ *
+ * Separate from findUnsatisfiedRequirements because a DEPLOY_PROMPTS entry counts as
+ * satisfying a requirement there — which is right for an interactive deploy and wrong
+ * for a headless one, where the prompt never runs and nothing supplies a value. This
+ * looks at what was ACTUALLY chosen.
+ */
+export function resolveDeployWorld(
+  config: GameServerConfig,
+  overrides: Record<string, string> = {},
+): string | undefined {
+  return (
+    config.worldSync.worldName ||
+    overrides['WORLD_NAME'] ||
+    config.gameEnvVars['WORLD_NAME'] ||
+    undefined
+  );
+}
+
+/**
+ * Refuses a deploy of a world-sync service that names no world.
+ *
+ * A world name is not a setting with a sensible default: Valheim does not fail on an
+ * unknown one, it GENERATES a new empty world under it. So defaulting the name means a
+ * routine deploy can silently fabricate a world wearing a real world's name, which the
+ * sidecar then mirrors to S3. Making every deploy name one turns "which world are we
+ * playing" into a decision somebody makes, which is what it already was in practice.
+ */
+export function formatMissingWorldError(config: GameServerConfig, worlds: string[]): string {
+  return [
+    `${config.serviceName} runs world-sync but this deploy names no world.`,
+    '',
+    'There is deliberately no default: Valheim does not error on an unknown world name,',
+    'it creates a new empty one under it — so a defaulted name can fabricate a world that',
+    'looks real and gets mirrored to S3.',
+    '',
+    worlds.length > 0
+      ? `Worlds in this service's library: ${worlds.join(', ')}`
+      : "This service's library is empty — pull or place a world first.",
+    '',
+    'Choose one with:',
+    `  pnpm respawn  ->  Deploy  ->  ${config.serviceName}   (asks which world)`,
+    `  or the MCP:  switch_world(service="${config.serviceName}", world="<name>")`,
+  ].join('\n');
+}
+
 /** Formats the unsatisfied requirements into an actionable error message. */
 export function formatRequirementError(
   config: GameServerConfig,

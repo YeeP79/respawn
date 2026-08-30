@@ -10,7 +10,7 @@ import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { Construct, type IConstruct } from 'constructs';
 import type { SecretRef } from '@respawn/core';
 import type { GameServerConfig } from '@respawn/core';
-import { clusterName, ecsServiceName, execAuditLogGroupName } from '@respawn/core';
+import { clusterName, ecsServiceName, execAuditLogGroupName, resolveWorldName } from '@respawn/core';
 import { GameServerLogging } from './logging.js';
 import { GameServerNetworking } from './networking.js';
 import { GameServerEfsStorage } from './efs-storage.js';
@@ -18,6 +18,7 @@ import { IdleShutdownSidecar } from './idle-shutdown.js';
 import { RconControlSidecar } from './rcon-control.js';
 import { MysqlSidecar } from './mysql-sidecar.js';
 import { RedisSidecar } from './redis-sidecar.js';
+import { WorldSyncSidecar } from './world-sync.js';
 
 export interface GameServerFargateServiceProps {
   config: GameServerConfig;
@@ -188,6 +189,58 @@ export class GameServerFargateService extends Construct {
 
       // Grant the task role access to the EFS file system
       efsStorage.fileSystem.grantReadWrite(taskDefinition.taskRole);
+
+      // World-sync sidecar (optional) — makes the save on this volume rotatable from a
+      // machine outside the VPC. Nested inside the persistent-storage branch on purpose:
+      // it mounts this volume, so without one there is nothing for it to sync, and the
+      // loader rejects the combination rather than letting it synth into a container
+      // that mirrors an empty directory for ever.
+      if (config.worldSync.enabled) {
+        const worldSync = new WorldSyncSidecar(this, 'WorldSync', {
+          taskDefinition,
+          logGroup: logging.logGroup,
+          s3Prefix: config.worldSync.s3Prefix!,
+          // Resolved here, not read off the loaded config: a DEPLOY_PROMPTS answer
+          // rewrites gameEnvVars in app.ts after loadConfig, and this is what makes
+          // the sidecar follow a world rotation instead of staying on the old name.
+          // Empty when nothing named a world, and deliberately NOT a throw: app.ts
+          // synthesizes EVERY service stack on every run to keep the shared stack's
+          // exports stable, so throwing here would make one service without a chosen
+          // world break synth and diff for the whole fleet.
+          //
+          // Safe because the guard is layered. Deploy preflight refuses a world-sync
+          // service that names no world; and if an empty one ever reached a task, the
+          // sidecar's required-variable check exits immediately, so its health check
+          // never passes and the game container's HEALTHY dependency holds the game
+          // back. The game never starts, and never generates a world nobody chose.
+          worldName: resolveWorldName(config) ?? '',
+          worldDir: `${config.persistentStorage.mountPath}/${config.worldSync.worldSubdir}`,
+          volumeName: 'persistent-data',
+          mountPath: config.persistentStorage.mountPath,
+          syncIntervalSeconds: config.worldSync.syncIntervalSeconds,
+          seedForce: config.worldSync.seedForce,
+          flavor: config.worldSync.flavor!,
+          allowCreate: config.worldSync.allowCreate,
+          serviceName: config.serviceName,
+          ...(config.worldSync.pluginSource
+            ? {
+                pluginSource: config.worldSync.pluginSource,
+                // Where the lloesche image reads BepInEx plugins from, under the volume.
+                pluginDir: `${config.persistentStorage.mountPath}/bepinex/plugins`,
+              }
+            : {}),
+        });
+
+        // Hold the game until seeding has settled. Valheim reads the world once, at
+        // startup, and holds it open for the life of the task — so a save installed
+        // after that point is not picked up, and worse, the game's own periodic save
+        // then overwrites the world that was just seeded with the one it booted on.
+        // Losing this race does not delay the rotation, it silently reverses it.
+        container.addContainerDependencies({
+          container: worldSync.container,
+          condition: ecs.ContainerDependencyCondition.HEALTHY,
+        });
+      }
     }
 
     // MySQL sidecar (optional) — for mods that need a database to FUNCTION, not just

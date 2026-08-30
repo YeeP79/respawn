@@ -378,6 +378,305 @@ a safe failure mode for an unsafe one.
 The FastDL bucket must be public-read (GoldSrc clients send no credentials), so treat
 anything uploaded as openly downloadable.
 
+### A save file is not FastDL content: it must round-trip, not publish
+
+`apps/valheim` ships a world save through S3, and it looks like the `tfc` content
+pattern but is its opposite. Custom maps are **static, read-only, and reproducible**
+from `maps.txt` — the server never reads the bucket, so publishing and clearing them
+one-way is safe, and a lost copy is one `content:fetch` away. A world save is
+**mutable live state and the only copy of a session's progress**. Push-before /
+clear-after, applied to it, discards every session.
+
+So the cycle is a round trip, and both halves are load-bearing:
+
+| Half | Command | Skipping it means |
+|------|---------|-------------------|
+| In | `pnpm valheim:world:publish <variant> <world>` → restart | the server keeps playing the world it booted on |
+| Out | `pnpm valheim:world:pull <variant> <world>` | the session's progress exists only on EFS, then only until the next seed |
+
+Every script takes the **variant** first (`vanilla` \| `modded`): the library, the S3
+prefix and the flavor are all per-variant, and defaulting it would pick one server's
+library while talking to the other's bucket.
+
+The `world-sync` sidecar (`apps/respawn/sidecar/world-sync`) mounts the same EFS
+volume as the game and mirrors the save to `<prefix>/live/` on an interval **and** on
+SIGTERM. The interval one is the load-bearing one — a task can die without ever
+delivering SIGTERM — exactly as in `sidecar/mysql-backup`.
+
+It is **not** that sidecar with different paths. `mysql-backup` restores from S3
+unconditionally, which is right when the task has no volume and S3 holds the only
+copy. Here EFS outlives the task and holds the live world, so an unconditional restore
+would replay a stale save over a played one. Two rules follow, both enforced:
+
+- **The volume is authoritative.** Nothing is written to it unless a save was
+  explicitly placed in `<prefix>/inbox/`, which is drained **once** and deleted — a
+  handoff, not standing config, so a task restarting mid-session cannot re-seed over
+  live play.
+- **A stale push is refused.** The `.db` header carries `netTime`, the in-game clock,
+  which Valheim advances only while a player is connected. An incoming save whose
+  clock is *behind* the volume's is rejected on both sides (script and sidecar) —
+  that is the machine-checkable form of "this would discard progress". mtime cannot
+  do this: it does not survive a copy or an upload. `WORLD_SYNC_SEED_FORCE=true`
+  overrides, for a deliberate rollback.
+
+**There is deliberately no default world, and that is a safety property.** Valheim does
+not error on an unknown world name — it **generates a new empty world under it** and runs
+happily. So a defaulted `GAME_ENV_WORLD_NAME` means a routine deploy can fabricate a
+convincing empty world wearing a real world's name, which the sidecar then mirrors to S3
+where it can later be pulled down and mistaken for the real thing. That happened twice
+before this guard existed, including 325 KB of junk mirrored under a name that mattered.
+
+Three layers, because the failure is silent at every one of them alone:
+
+| Layer | Guard |
+|---|---|
+| Deploy | preflight refuses a world-sync service that names no world, listing the library |
+| Synth | an unnamed world emits `WORLD_NAME=''` rather than throwing — `app.ts` synthesizes **every** stack each run, so a throw would break the fleet for one service |
+| Runtime | the sidecar refuses to signal ready when the save is absent, so the game is held back and creates nothing (`WORLD_ALLOW_CREATE=true` opts in to a genuinely new world) |
+
+The load-time check was tried and removed: `stack-discovery.ts` catches a config error and
+only **warns**, so throwing there made the service vanish from the CLI menu instead of
+asking which world to run — the opposite of the intent. `REQUIRED_ENV_VARS` does not work
+here either, because `findUnsatisfiedRequirements` treats a `DEPLOY_PROMPTS` entry as
+satisfying the requirement, which is right interactively and wrong for a headless deploy
+where the prompt never runs.
+
+**Rotating to a different world is a deploy-time choice**, via `DEPLOY_PROMPTS=WORLD_NAME:select:...`
+— `pnpm respawn` → Deploy → valheim → pick. The name *is* the save's file name, and the
+sidecar resolves it through `resolveWorldName()` from `gameEnvVars`, **not** from the
+loaded config. That indirection is load-bearing: `app.ts` applies the prompt answer to
+`gameEnvVars` *after* `loadConfig` runs, so a name captured at load time is the
+pre-prompt one — which moved the game to the new world and left the sidecar seeding an
+inbox nobody fills and mirroring a world nobody plays, silently, in both directions.
+`WORLD_SYNC_NAME` pins the sidecar against a rotation, for the rare case that wants it.
+
+**Worlds accumulate on the volume by file name**, so rotating back to one that has
+already run here needs no S3 at all — the sidecar finds no inbox entry and keeps what
+the volume has. S3 is only for bringing a world IN from a laptop or taking one OUT.
+Consequence worth knowing: the volume can hold worlds the local library has never seen,
+and nothing local lists them — `check-content.sh` sees only the library and the bucket.
+
+The game container waits on the sidecar's health check before starting. Valheim reads
+the world once and holds it open, so a save installed after that point is not merely
+ignored — the game's next periodic save overwrites it. Losing that race silently
+*reverses* the rotation rather than delaying it.
+
+**What the clock guard does NOT catch.** It compares *how much play* two copies hold,
+so it only ever protects against losing progress. It is blind to a world being
+*damaged* — a mod-corrupted save has a HIGHER clock than the clean one, so both the
+sidecar and the scripts will happily install it and pull it down over a good copy.
+Valheim stores objects as a continuous stream, so a save corrupted by a removed
+content mod is often unrecoverable rather than merely degraded. Before enabling any
+mod that adds prefabs, copy the world to a new name in `worlds/` — that snapshot is a
+first-class rotation target and nothing automatic can overwrite it.
+
+Use the **private** state bucket (`respawn-state-*`, shared with cs16-kz's dumps and
+scoped per-prefix by the task role), never the FastDL one: that is public-read by
+necessity, and a world save is the entire map, every base and chest in it.
+
+`apps/*/worlds/` is gitignored like `content/`, but unlike `content/` it is **not
+reproducible** — there is no manifest to refetch it from. It is the master copy and
+needs its own backup.
+
+### Modded and vanilla are separate services, and a save remembers where it ran
+
+`apps/valheim` is two variants — `valheim` (vanilla) and `valheim-modded` (BepInEx via
+`GAME_ENV_BEPINEX=true`). Separate services means separate stacks, so **separate EFS
+volumes and disjoint S3 prefixes**; neither can reach the other's world by construction.
+
+That is not enough on its own, because a save can be carried between them by hand. So
+every save carries a provenance stamp, `<world>.respawn.json`, written by the sidecar
+(which knows what server it is) and travelling with the `.db`/`.fwl` through S3:
+
+```json
+{ "world": "respawn-world", "flavor": "modded", "mods": ["EpicLoot.dll"],
+  "history": [ { "service": "valheim-modded", "flavor": "modded", "at": "…", "mods": […] } ] }
+```
+
+**The rule is one-way: `vanilla` → `modded` is allowed and stamps the save permanently;
+a save stamped `modded` is refused by the vanilla server for ever.** That asymmetry
+mirrors the physical fact — mod-added objects are ZDOs carrying the mod's prefab hashes,
+and loading them without the mod makes Valheim destroy those objects and rewrite a
+continuous object stream that usually cannot be repaired. Adding mods costs nothing;
+removing them is the destructive direction.
+
+Checked in three places, deliberately: `publish-world.sh` (so the operator finds out at
+the keyboard), the sidecar at seed time (the side that cannot be bypassed by copying
+files into the bucket), and `check-content.sh`, which flags a modded save sitting in a
+vanilla library. An **unstamped** save is refused into vanilla too — unknown provenance
+is not the same as known-clean — and `--assume-vanilla` is the operator asserting it.
+
+`write_stamp` takes `modded` from whichever side carries it, so a later vanilla run
+cannot launder a modded save; it only appends to `history`.
+
+**Mods are content, not state.** `mods.txt` is tracked and `mods/` is gitignored and
+rebuildable — the `content/` relationship, not the `worlds/` one. Both the fetch and the
+publish use `--delete`, as does the sidecar's sync: without that, removing a line from
+`mods.txt` leaves the plugin on the volume and the server keeps loading a mod nobody
+believes is installed, which then writes its prefabs into the world.
+
+Plugins are mirrored **one way** (S3 → volume) before the game starts, and a failed
+plugin sync deliberately never signals ready — the game container's dependency holds it
+back for ever rather than let a modded server come up unmodded and write an unmodded
+state into a world whose players expect the mods.
+
+**Crossplay is incompatible with BepInEx** and is pinned off on the modded variant. With
+crossplay on, Valheim uses PlayFab networking instead of Steam, BepInEx cannot hook it,
+and plugins silently do not load — a healthy-looking, entirely unmodded server.
+
+### Mid-game admin is a modded-only capability, and the MCP drives it
+
+Vanilla Valheim has **no remote console at all**: an admin must be a logged-in player,
+and on a dedicated server only Group A commands (kick/ban/unban/banned/save/ping) work.
+So `valheim` cannot be administered mid-game by anything, ever. That is a second,
+independent reason the modded variant exists.
+
+`valheim-modded` gets it from `Tristan/ValheimRcon`, which adds an rcon listener — and
+the fleet already speaks that: `ENABLE_RCON_CONTROL` + `RCON_PROTOCOL=source` hands the
+whole existing rcon-control sidecar and MCP surface to Valheim with no new transport.
+
+Two things that are easy to get wrong:
+
+- The port is `2458/tcp` in **`INTERNAL_PORTS`**, so it gets a task mapping and no public
+  ingress (verified in the synthesized template: only 2456-2458/**udp** are open). An
+  admin port in `ADDITIONAL_PORTS` would be world-reachable.
+- The plugin is config-**file** driven, so the password cannot be a `GAME_ENV_` value —
+  that lands in the task definition in plaintext. `WORLD_SYNC_RCON_CONFIG` makes the
+  world-sync sidecar write it, because that container is the only one that both holds the
+  ECS secret and mounts the volume the config lives on. It **patches** the two keys rather
+  than generating the file, so it needs no knowledge of the plugin's section name; only a
+  first-ever boot takes the generate path, and it says so in the log. Failure is
+  fail-closed by the plugin's own design — an empty password disables it, so a config that
+  cannot be written means no rcon, never an unauthenticated listener.
+
+**`world-safe` in `mods.txt` is what stops admin tooling quarantining a world.** A plugin
+that opens a socket and runs commands writes no prefabs, so a world it ran under is still
+a vanilla world — stamping it `modded` would refuse it from the vanilla server for ever,
+for nothing. The flag asserts that, the sidecar stamps `vanilla` when every plugin present
+carries it, and `world_safe_only` in the stamp's history records the claim so it can be
+audited. It is an assertion, not something derivable from a `.dll`: the default is unsafe
+and one unlisted plugin makes the whole run world-altering.
+
+**Adoption cost of mods is one thing, and it is not client installs.** A server-side
+plugin needs nothing from players. What it costs is crossplay: with crossplay on Valheim
+uses PlayFab networking, BepInEx cannot hook it, and plugins silently do not load — so the
+modded variant pins `GAME_ENV_CROSSPLAY=false` and is **Steam/PC only**. That exclusion is
+invisible to an Xbox player (their join looks like a network fault), so it is carried in
+`SERVER_NAME` and `SERVICE_DISPLAY_NAME` rather than left in a comment.
+
+`list_worlds` answers **"which worlds do we have"** and is the entry point to all of the
+above — `publish_world` and `switch_world` both need a name you can only get from
+somewhere. It reads local disk only: no AWS calls, instant, and it still works when the
+SSO session has expired, which is precisely when `world_status` cannot answer (it needs
+three S3 round trips and degrades to VERDICT UNKNOWN). The two answer different
+questions — "what do we have" vs "has the server been played since my copy" — and neither
+substitutes for the other.
+
+**"Can it run without mods" is the wrong question, so the tool does not answer it.** A
+modded save loads on a vanilla server perfectly happily — it just silently deletes every
+object the mods created, and Valheim writes objects as a continuous stream, so that damage
+is usually unrepairable. What matters is the *cost*, which is reported as a consequence:
+
+```
+without mods: safe — nothing mod-created is in this save
+without mods: DESTRUCTIVE — objects created by EpicLoot.dll would be deleted on load, permanently
+without mods: UNKNOWN — no provenance stamp, so nothing knows whether a world-altering mod ever ran
+```
+
+The stamp records `mods_world_safe` and `mods_world_altering` separately, not just a flat
+`mods` list, so the culprit can be **named**. A bare list says what ran; it does not say
+which of those threaten a later vanilla load — and the `.world-safe` manifest that would
+answer that lives on a server, not next to the save. A stamp written before the split
+degrades honestly: no annotation, verdict still taken from `flavor`, no invented
+classification.
+
+It groups by world NAME rather than by service, because one save living in two libraries
+is one world; and it flags **divergence** when those copies disagree on save-format
+version or world clock, which is the state where "the world" silently names two
+different things.
+
+The MCP exposes the world lifecycle as `world_status` (read-only, always available),
+`publish_world`, `pull_world`, `clear_world` and `switch_world`. `switch_world` redeploys
+with a `WORLD_NAME` override and **refuses a name the library does not have** — deploying
+an unknown world does not fail, Valheim creates a new empty one and runs it, so a typo
+would silently replace the session with a fresh spawn.
+
+### The MCP's tools are service-parameterised, so applicability is data
+
+One `deploy`, one `run_command`, twenty services — per-server tools would mean 32 x 20 of
+them. The cost of that shape is a discoverability gap: nothing said which families a given
+service supports, and the failure it produced was not an error but a *wrong conclusion*.
+`valheim` has no rcon transport, so "no manifest" there is a category fact about the game,
+not a file somebody forgot to write — and a caller who read it as the latter would go and
+write one that could never help.
+
+`resolveFamilies()` in `capabilities.ts` derives it from config in **one** place, so a new
+family cannot be added to the fleet and quietly stay missing from what the MCP advertises.
+Surfaced by `list_services` (every configured service, running or not) and by
+`get_server_options` on **both** branches — the summary used to exist only where a manifest
+was missing, so the services with the richest surface were told least about it.
+
+Three states, kept distinct because they call for opposite actions:
+
+| State | Meaning |
+|---|---|
+| `commands:<n>` | transport + manifest; usable |
+| `commands:UNREACHABLE(drift)` | a manifest exists but `ENABLE_RCON_CONTROL` is off — declared and unreachable |
+| `commands:none` | no transport configured |
+| `commands:no-manifest` | transport is on, nobody wrote the manifest |
+
+Drift gets its own token in the one-line listing rather than folding into `none`, because
+the listing is what people scan; hiding it behind a per-service call defeats the point.
+It found six real cases on first run (`cs2`, `css`, `gmod`, `l4d2`, `tf2`, `quake3`).
+
+**The no-transport message deliberately does not claim the game has no console.** Config
+cannot tell "offers none" from "nobody enabled it" — Valheim being the former took
+research, not a config read, and asserting it generally would be a guess wearing the
+costume of a fact.
+
+`get_server_options` returns this as a **success**, not an error. Returning `isError` for a
+fully working service made it read as misconfigured.
+
+### A mod's config file is written by the game container, not by a sidecar
+
+`apps/valheim/variants/modded` builds its own image (`FROM ghcr.io/lloesche/valheim-server`)
+for exactly one reason: the rcon plugin's password. The plugin is config-**file** driven, so
+the value cannot be a `GAME_ENV_` (plaintext in the task definition) — it has to be written
+into a file, from an ECS secret, inside the container.
+
+The obvious home was the `world-sync` sidecar, which already holds a secret and mounts the
+volume. **Measured, and wrong.** On the first real deploy:
+
+```
+23:21:39  [world-sync] wrote rcon config to /config/bepinex/config/
+23:23:57  [valheim-updater] Fresh BepInEx install        <- into /opt, 2 min later
+23:24:15  [Valheim Rcon] Password is empty. Plugin will not work.
+23:24:42  [Valheim Rcon] Start listening rcon commands
+```
+
+BepInEx installs into `/opt/valheim/bepinex/`, and the plugin reads its config from there —
+never from the volume. Only the game container has **both** the injected secret and that
+tree, which is why this is a shim, exactly as the two-image-strategies rule says.
+
+**The failure mode is the part worth remembering:** an empty password does not disable the
+listener, it makes it reject every auth. So a config that was never read presents as
+`rcon password rejected` — indistinguishable from a wrong credential, and nothing points at
+the file. `rcon-control` and the wire protocol were both fine the whole time.
+
+Timing is the whole mechanism. The shim runs on **`PRE_SERVER_RUN_HOOK`**, after the updater
+merges BepInEx and before the server starts. Both earlier hooks (bootstrap,
+`POST_BEPINEX_CONFIG_HOOK`) fire *before* a fresh install, which then lands on top of
+whatever they wrote — and the plugin's own config says "[Server restart required for
+update]", so being late is not recoverable within a run either. The hook is set as `ENV` in
+the Dockerfile, not in `.env`, so no shell quoting has to survive a dotenv value and a task
+definition.
+
+It patches the two keys it owns rather than generating the file, so it stays correct if the
+plugin renames or reorders sections; it only generates on a first run, under `[1. Rcon]` —
+read out of the shipped assembly's string table, not guessed. Every failure path is
+non-fatal: no secret, no BepInEx tree, or no `Password` key all leave rcon disabled rather
+than blocking a server that is otherwise fine.
+
 ### CPU and memory must be a valid Fargate pair
 
 `loader.ts` validates against the AWS matrix and fails fast. `CPU=256` allows 512–2048 MiB;

@@ -15,6 +15,7 @@ export interface GameServerConfig {
   mysql: MysqlConfig;
   rconControl: RconControlConfig;
   persistentStorage: PersistentStorageConfig;
+  worldSync: WorldSyncConfig;
   secretRefs: SecretRef[];
   deployPrompts: DeployPrompt[];
   gameEnvVars: Record<string, string>;
@@ -102,6 +103,69 @@ export interface PersistentStorageConfig {
   enabled: boolean;
   mountPath: string;
 }
+
+/**
+ * Round-trips a save file between the persistent volume and S3, so it can be rotated
+ * from a machine with no route into the VPC.
+ *
+ * Distinct from `MysqlConfig.backupS3Uri`, which exists because that sidecar has NO
+ * volume and S3 is its only copy. Here the volume holds the live save and outlives the
+ * task, so S3 is a transfer channel rather than the store — which is why the sidecar
+ * seeds only from an explicit `inbox/` and never restores on its own.
+ */
+export interface WorldSyncConfig {
+  enabled: boolean;
+  /** `s3://bucket/prefix` under which `inbox/` and `live/` live. */
+  s3Prefix?: string;
+  /**
+   * Save file name, without extension. Defaults to `GAME_ENV_WORLD_NAME`, because the
+   * two are the same string and letting them drift means the sidecar mirrors a world
+   * the game never opens — which looks like a working backup until it is needed.
+   */
+  worldName?: string;
+  /** Directory the game keeps saves in, relative to the volume's mount path. */
+  worldSubdir: string;
+  syncIntervalSeconds: number;
+  /**
+   * Install an inbox save even when its world clock is BEHIND the volume's. Off by
+   * default: that comparison is the only automatic guard against a stale push
+   * discarding a played session, so overriding it must be a deliberate rollback.
+   */
+  seedForce: boolean;
+  /**
+   * What kind of server this is. Stamped onto every save that runs here, and checked
+   * before one is installed.
+   *
+   * The asymmetry is the point: `vanilla` -> `modded` is allowed and stamps the save
+   * permanently, but a save stamped `modded` is refused by a `vanilla` server for ever.
+   * Mod-added objects are ZDOs carrying the mod's prefab hashes; without the mod those
+   * hashes do not resolve and Valheim destroys the objects on load, writing the result
+   * back into a continuous object stream that frequently cannot be repaired. The clock
+   * guard cannot catch this — a damaged save has MORE play on it, not less.
+   */
+  flavor?: WorldFlavor;
+  /**
+   * Key under the S3 prefix holding mod plugins to sync into the game's plugin
+   * directory before it starts. Unset means no plugin sync.
+   */
+  pluginSource?: string;
+  /**
+   * Permit the game to CREATE the named world when no save by that name exists.
+   *
+   * Off by default, and the default is the point. Valheim does not error on an unknown
+   * world name — it generates a brand-new empty world under it and runs, so a deploy
+   * that names a world nobody staged silently produces a convincing fake, which the
+   * sidecar then mirrors to S3 under the real world's name. Measured: two junk worlds
+   * were created this way before this guard existed.
+   *
+   * With it off, the sidecar refuses to signal ready when the save is absent, so the
+   * game never starts and no world is invented. Starting a genuinely new world is then
+   * a deliberate act rather than the failure mode of a typo.
+   */
+  allowCreate: boolean;
+}
+
+export type WorldFlavor = 'vanilla' | 'modded';
 
 export interface NetworkingConfig {
   containerPort: number;

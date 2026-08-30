@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadConfig } from './loader.js';
+import { loadConfig, resolveWorldName } from './loader.js';
 
 const FIXTURES_DIR = path.join(__dirname, '__fixtures__');
 
@@ -1021,4 +1021,277 @@ describe('loadConfig', () => {
     });
   });
 
+});
+
+describe('world-sync sidecar', () => {
+  beforeEach(() => fs.mkdirSync(FIXTURES_DIR, { recursive: true }));
+  afterEach(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  const base = [
+    'SERVICE_NAME=valheim-test',
+    'ENABLE_PERSISTENT_STORAGE=true',
+    'PERSISTENT_MOUNT_PATH=/config',
+    'ENABLE_WORLD_SYNC=true',
+    'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123/valheim',
+    'GAME_ENV_WORLD_NAME=Respawn World',
+    'WORLD_FLAVOR=vanilla',
+  ];
+
+  function load(dir: string, lines: string[]) {
+    const d = path.join(FIXTURES_DIR, dir);
+    writeEnvFile(d, lines.join('\n'));
+    return loadConfig(d, 'dev');
+  }
+
+  it('is off by default', () => {
+    const config = load('ws-off', ['SERVICE_NAME=test-svc']);
+    expect(config.worldSync.enabled).toBe(false);
+  });
+
+  it('leaves worldName unset so the name resolves at synth time', () => {
+    const config = load('ws-name', base);
+    // Deliberately NOT 'Respawn World': baking it here is what made the sidecar miss a
+    // deploy-time world rotation. See the resolveWorldName suite.
+    expect(config.worldSync.worldName).toBeUndefined();
+    expect(resolveWorldName(config)).toBe('Respawn World');
+    expect(config.worldSync.worldSubdir).toBe('worlds_local');
+    expect(config.worldSync.syncIntervalSeconds).toBe(300);
+    expect(config.worldSync.seedForce).toBe(false);
+  });
+
+  it('lets WORLD_SYNC_NAME override the game env name', () => {
+    const config = load('ws-override', [...base, 'WORLD_SYNC_NAME=Other World']);
+    expect(config.worldSync.worldName).toBe('Other World');
+  });
+
+  it('rejects world sync without persistent storage', () => {
+    expect(() =>
+      load('ws-novol', base.filter((l) => l !== 'ENABLE_PERSISTENT_STORAGE=true')),
+    ).toThrow(/ENABLE_PERSISTENT_STORAGE/);
+  });
+
+  it('rejects world sync with no S3 prefix', () => {
+    expect(() =>
+      load('ws-nos3', base.filter((l) => !l.startsWith('WORLD_SYNC_S3_PREFIX'))),
+    ).toThrow(/WORLD_SYNC_S3_PREFIX/);
+  });
+
+  it('rejects a prefix that is not an s3:// URI', () => {
+    expect(() =>
+      load('ws-bads3', [
+        ...base.filter((l) => !l.startsWith('WORLD_SYNC_S3_PREFIX')),
+        'WORLD_SYNC_S3_PREFIX=respawn-state-123/valheim',
+      ]),
+    ).toThrow(/must be an s3:\/\/ URI/);
+  });
+
+  // The task role's S3 grant is scoped to this prefix, so a bucket root would hand the
+  // task every object in a bucket it shares with another service's player records.
+  it('rejects a bucket root, which would widen the task role grant', () => {
+    expect(() =>
+      load('ws-root', [
+        ...base.filter((l) => !l.startsWith('WORLD_SYNC_S3_PREFIX')),
+        'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123',
+      ]),
+    ).toThrow(/names a bucket with no prefix/);
+  });
+
+  it('rejects a bucket root written with a trailing slash', () => {
+    expect(() =>
+      load('ws-root-slash', [
+        ...base.filter((l) => !l.startsWith('WORLD_SYNC_S3_PREFIX')),
+        'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123/',
+      ]),
+    ).toThrow(/names a bucket with no prefix/);
+  });
+
+  // Deliberately NOT an error any more. A service may declare no default world so that
+  // every deploy has to name one; throwing here would make discovery drop it from the
+  // menu entirely. The requirement moved to deploy preflight (resolveDeployWorld).
+  it('loads with no world name, leaving the choice to deploy time', () => {
+    const config = load('ws-noname', base.filter((l) => !l.startsWith('GAME_ENV_WORLD_NAME')));
+    expect(config.worldSync.enabled).toBe(true);
+    expect(resolveWorldName(config)).toBeUndefined();
+  });
+
+  // 64 CPU / 128 MiB, same as mysql-backup. A CPU=256 task with the other sidecars on
+  // is the case that has to fail at load rather than at synth.
+  it('counts against the sidecar budget', () => {
+    expect(() =>
+      load('ws-budget', [
+        ...base,
+        'CPU=256',
+        'MEMORY=512',
+        'ENABLE_IDLE_SHUTDOWN=true',
+        'ENABLE_RCON_CONTROL=true',
+        'RCON_PORT=27015',
+        'SECRET_REFS=RCON_PASSWORD=sm:respawn/x/rcon',
+      ]),
+    ).toThrow(/world-sync/);
+  });
+});
+
+describe('resolveWorldName', () => {
+  beforeEach(() => fs.mkdirSync(FIXTURES_DIR, { recursive: true }));
+  afterEach(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  function load(dir: string, lines: string[]) {
+    const d = path.join(FIXTURES_DIR, dir);
+    writeEnvFile(d, lines.join('\n'));
+    return loadConfig(d, 'dev');
+  }
+
+  const base = [
+    'SERVICE_NAME=valheim-test',
+    'ENABLE_PERSISTENT_STORAGE=true',
+    'ENABLE_WORLD_SYNC=true',
+    'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123/valheim',
+    'GAME_ENV_WORLD_NAME=Respawn World',
+    'WORLD_FLAVOR=vanilla',
+  ];
+
+  it('resolves the game world name', () => {
+    expect(resolveWorldName(load('rw-basic', base))).toBe('Respawn World');
+  });
+
+  // The bug this exists to prevent: app.ts applies a DEPLOY_PROMPTS answer to
+  // gameEnvVars AFTER loadConfig, so a name captured at load time is the pre-prompt
+  // one. The sidecar would then seed an inbox nobody fills and mirror a world nobody
+  // plays — silently, in both directions, with the game happily on the new world.
+  it('follows a deploy-time override of WORLD_NAME', () => {
+    const config = load('rw-override', base);
+    Object.assign(config.gameEnvVars, { WORLD_NAME: 'Second World' });
+    expect(resolveWorldName(config)).toBe('Second World');
+  });
+
+  // WORLD_SYNC_NAME is the deliberate pin, so it must NOT follow the prompt.
+  it('lets WORLD_SYNC_NAME pin the sidecar against a rotation', () => {
+    const config = load('rw-pin', [...base, 'WORLD_SYNC_NAME=Pinned World']);
+    Object.assign(config.gameEnvVars, { WORLD_NAME: 'Second World' });
+    expect(resolveWorldName(config)).toBe('Pinned World');
+  });
+
+  it('is undefined when nothing names a world', () => {
+    expect(resolveWorldName(load('rw-none', ['SERVICE_NAME=test-svc']))).toBeUndefined();
+  });
+});
+
+describe('world flavor and plugin config', () => {
+  beforeEach(() => fs.mkdirSync(FIXTURES_DIR, { recursive: true }));
+  afterEach(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  function load(dir: string, lines: string[]) {
+    const d = path.join(FIXTURES_DIR, dir);
+    writeEnvFile(d, lines.join('\n'));
+    return loadConfig(d, 'dev');
+  }
+
+  const base = [
+    'SERVICE_NAME=valheim-test',
+    'ENABLE_PERSISTENT_STORAGE=true',
+    'ENABLE_WORLD_SYNC=true',
+    'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123/valheim',
+    'GAME_ENV_WORLD_NAME=Respawn World',
+    'WORLD_FLAVOR=vanilla',
+  ];
+
+  it('parses flavor and plugin source', () => {
+    const c = load('wf-ok', [...base, 'WORLD_SYNC_PLUGIN_SOURCE=plugins']);
+    expect(c.worldSync.flavor).toBe('vanilla');
+    expect(c.worldSync.pluginSource).toBe('plugins');
+  });
+
+  it('accepts modded', () => {
+    const c = load('wf-modded', [...base.filter((l) => !l.startsWith('WORLD_FLAVOR')), 'WORLD_FLAVOR=modded']);
+    expect(c.worldSync.flavor).toBe('modded');
+  });
+
+  // A typo must not read as "no flavor declared". The flavor is the only thing keeping a
+  // modded save out of a vanilla server, and a guard that silently disables itself on a
+  // typo is worse than none, because it is still believed.
+  it('rejects an unknown flavor rather than defaulting', () => {
+    expect(() =>
+      load('wf-typo', [...base.filter((l) => !l.startsWith('WORLD_FLAVOR')), 'WORLD_FLAVOR=vanila']),
+    ).toThrow(/Invalid WORLD_FLAVOR/);
+  });
+
+  it('requires a flavor when world sync is on', () => {
+    expect(() => load('wf-none', base.filter((l) => !l.startsWith('WORLD_FLAVOR')))).toThrow(
+      /needs WORLD_FLAVOR/,
+    );
+  });
+
+  // The failure this catches is invisible: the stack synthesizes cleanly with no sidecar,
+  // so the world is never seeded, mirrored or stamped while the .env reads as if it is.
+  // Found by reading a synthesized template, not by anything failing.
+  it('rejects world settings with the sidecar switched off', () => {
+    expect(() =>
+      load('wf-orphan', base.filter((l) => l !== 'ENABLE_WORLD_SYNC=true')),
+    ).toThrow(/ENABLE_WORLD_SYNC is not true/);
+  });
+
+  it('names every orphaned setting, not just the first', () => {
+    let msg = '';
+    try {
+      load('wf-orphans', [
+        ...base.filter((l) => l !== 'ENABLE_WORLD_SYNC=true'),
+        'WORLD_SYNC_PLUGIN_SOURCE=plugins',
+      ]);
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e);
+    }
+    expect(msg).toContain('WORLD_SYNC_S3_PREFIX');
+    expect(msg).toContain('WORLD_FLAVOR');
+    expect(msg).toContain('WORLD_SYNC_PLUGIN_SOURCE');
+  });
+});
+
+describe('no default world', () => {
+  beforeEach(() => fs.mkdirSync(FIXTURES_DIR, { recursive: true }));
+  afterEach(() => fs.rmSync(FIXTURES_DIR, { recursive: true, force: true }));
+
+  function load(dir: string, lines: string[]) {
+    const d = path.join(FIXTURES_DIR, dir);
+    writeEnvFile(d, lines.join('\n'));
+    return loadConfig(d, 'dev');
+  }
+
+  const base = [
+    'SERVICE_NAME=valheim-test',
+    'ENABLE_PERSISTENT_STORAGE=true',
+    'ENABLE_WORLD_SYNC=true',
+    'WORLD_SYNC_S3_PREFIX=s3://respawn-state-123/valheim',
+    'WORLD_FLAVOR=vanilla',
+  ];
+
+  // Loading must SUCCEED with no world named. A throw here would make discovery drop the
+  // service from the CLI menu (it catches config errors and only warns) — so the service
+  // would silently vanish instead of asking which world to run.
+  it('loads with no world named at all', () => {
+    const config = load('nd-none', base);
+    expect(config.worldSync.enabled).toBe(true);
+    expect(resolveWorldName(config)).toBeUndefined();
+  });
+
+  it('resolves a world supplied as a deploy-time answer', () => {
+    const config = load('nd-pick', base);
+    Object.assign(config.gameEnvVars, { WORLD_NAME: 'Respawn World' });
+    expect(resolveWorldName(config)).toBe('Respawn World');
+  });
+
+  // Valheim generates an empty world under an unknown name rather than failing, so the
+  // sidecar must not be allowed to let that happen by default.
+  it('does not allow implicit world creation by default', () => {
+    expect(load('nd-create-off', base).worldSync.allowCreate).toBe(false);
+  });
+
+  it('allows creation only when explicitly opted in', () => {
+    expect(load('nd-create-on', [...base, 'WORLD_ALLOW_CREATE=true']).worldSync.allowCreate).toBe(true);
+  });
+
+  it('still rejects world settings when the sidecar is switched off', () => {
+    expect(() =>
+      load('nd-orphan', [...base.filter((l) => l !== 'ENABLE_WORLD_SYNC=true'), 'WORLD_ALLOW_CREATE=true']),
+    ).toThrow(/ENABLE_WORLD_SYNC is not true/);
+  });
 });

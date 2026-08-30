@@ -9,6 +9,7 @@ import type {
   RconProtocol,
   SecretRef,
   UpdateCheck,
+  WorldFlavor,
 } from './types.js';
 import {
   DEFAULT_CONTAINER,
@@ -22,6 +23,8 @@ import {
   DEFAULT_IDLE_SHUTDOWN,
   DEFAULT_REDIS,
   DEFAULT_MYSQL,
+  DEFAULT_WORLD_SYNC,
+  WORLD_FLAVORS,
   DEFAULT_RCON_CONTROL,
   DEFAULT_PERSISTENT_STORAGE,
   DEFAULT_AWS,
@@ -108,6 +111,24 @@ function parseRconProtocol(value: string | undefined, envName = 'RCON_PROTOCOL')
   if (!match) {
     throw new Error(
       `Invalid ${envName}: ${value}. Expected one of ${RCON_PROTOCOLS.join(', ')}.`,
+    );
+  }
+  return match;
+}
+
+/**
+ * @throws On anything but the two known flavors. Falling through to undefined would
+ *   make a typo read as "no flavor declared", and the whole point of the field is that
+ *   a modded save cannot reach a vanilla server — a guard that silently disables itself
+ *   on a typo is worse than no guard, because it is still believed.
+ */
+function parseWorldFlavor(value: string | undefined): WorldFlavor | undefined {
+  if (value === undefined || value === '') return undefined;
+  const lower = value.toLowerCase();
+  const match = WORLD_FLAVORS.find((f) => f === lower);
+  if (!match) {
+    throw new Error(
+      `Invalid WORLD_FLAVOR "${value}". Expected one of ${WORLD_FLAVORS.join(', ')}.`,
     );
   }
   return match;
@@ -394,6 +415,7 @@ const SIDECAR_RESERVATIONS = {
   redis: { cpu: 64, memory: 128 },
   mysql: { cpu: 128, memory: 512 },
   mysqlBackup: { cpu: 64, memory: 128 },
+  worldSync: { cpu: 64, memory: 128 },
 } as const;
 
 /**
@@ -426,6 +448,8 @@ function validateSidecarBudget(config: GameServerConfig): void {
     if (config.mysql.backupS3Uri)
       active.push(['mysql-backup', SIDECAR_RESERVATIONS.mysqlBackup]);
   }
+  if (config.worldSync.enabled)
+    active.push(['world-sync', SIDECAR_RESERVATIONS.worldSync]);
   if (active.length === 0) return;
 
   const cpu = active.reduce((n, [, r]) => n + r.cpu, 0);
@@ -457,6 +481,23 @@ function validateSidecarBudget(config: GameServerConfig): void {
         `Raise MEMORY to at least ${memory + MIN_GAME_MEMORY_MIB}. Enabled: ${breakdown}.`,
     );
   }
+}
+
+/**
+ * The save file the world-sync sidecar must act on.
+ *
+ * `WORLD_SYNC_NAME` pins it; otherwise it is the game's own `WORLD_NAME`, read from
+ * `gameEnvVars` rather than from the .env file. That indirection is the whole point: a
+ * `DEPLOY_PROMPTS` answer is applied to `gameEnvVars` in the CDK app AFTER `loadConfig`
+ * has run, so a name captured at load time is the pre-prompt one. Resolving it there
+ * meant that rotating worlds at deploy time moved the game and left the sidecar on the
+ * old name — seeding an inbox nobody fills and mirroring a world nobody plays, with no
+ * error on either side.
+ *
+ * Call this at synth time. Do not cache the result on the config.
+ */
+export function resolveWorldName(config: GameServerConfig): string | undefined {
+  return config.worldSync.worldName || config.gameEnvVars['WORLD_NAME'] || undefined;
 }
 
 function validate(config: GameServerConfig): void {
@@ -529,6 +570,77 @@ function validate(config: GameServerConfig): void {
       throw new Error(
         'UPDATE_CHECK=build requires a locally built image, but IMAGE_URI is set. ' +
           'Use UPDATE_CHECK=image instead.',
+      );
+    }
+  }
+
+  if (config.worldSync.enabled) {
+    // Every one of these is fatal at deploy time rather than load time if left to CDK,
+    // and two of them fail INVISIBLY: a sidecar with no world name mirrors nothing, and
+    // one pointed at a bucket root would be granted the whole bucket — which on the
+    // shared state bucket means another service's player records.
+    if (!config.persistentStorage.enabled) {
+      throw new Error(
+        `ENABLE_WORLD_SYNC needs ENABLE_PERSISTENT_STORAGE=true. The sidecar syncs the ` +
+          `save on the persistent volume; with no volume there is nothing to sync and ` +
+          `the world would die with the task anyway.`,
+      );
+    }
+    if (!config.worldSync.s3Prefix) {
+      throw new Error(
+        `ENABLE_WORLD_SYNC needs WORLD_SYNC_S3_PREFIX, e.g. ` +
+          `s3://respawn-state-<account>/${config.serviceName}. Use the PRIVATE state ` +
+          `bucket, never the FastDL one: that bucket is public-read by necessity, and a ` +
+          `world save there is the whole map openly downloadable.`,
+      );
+    }
+    const prefix = config.worldSync.s3Prefix;
+    if (!prefix.startsWith('s3://')) {
+      throw new Error(
+        `WORLD_SYNC_S3_PREFIX must be an s3:// URI, got "${prefix}".`,
+      );
+    }
+    // Bucket root rejected deliberately: the task role's grant is scoped to this prefix,
+    // so a root prefix widens it to every object in the bucket.
+    const key = prefix.replace(/^s3:\/\//, '').replace(/\/+$/, '').split('/').slice(1).join('/');
+    if (!key) {
+      throw new Error(
+        `WORLD_SYNC_S3_PREFIX "${prefix}" names a bucket with no prefix. The task role's ` +
+          `S3 grant is scoped to this prefix, so a bucket root would grant it every ` +
+          `object in the bucket. Use s3://<bucket>/${config.serviceName}.`,
+      );
+    }
+    if (!config.worldSync.flavor) {
+      throw new Error(
+        `ENABLE_WORLD_SYNC needs WORLD_FLAVOR (${WORLD_FLAVORS.join(' or ')}). It is ` +
+          `stamped onto every save that runs here and checked before one is installed, ` +
+          `which is what keeps a modded world out of a vanilla server.`,
+      );
+    }
+    // Deliberately NOT checked here. A service may legitimately declare no default world
+    // so that every deploy has to name one — and a throw at load time would make
+    // discovery drop the service from the CLI menu instead, since it catches config
+    // errors and only warns. The requirement is enforced at DEPLOY time by
+    // findUnsatisfiedWorld(), which is loud and knows the deploy's overrides.
+  }
+
+  if (!config.worldSync.enabled) {
+    // WORLD_* keys are inert without ENABLE_WORLD_SYNC, and the failure is invisible:
+    // the stack synthesizes cleanly with no sidecar, so the world is never seeded, never
+    // mirrored, and never stamped — while the .env reads as if all three happen. Found
+    // by reading a synthesized template, not by anything failing.
+    const orphans = [
+      ['WORLD_SYNC_S3_PREFIX', config.worldSync.s3Prefix],
+      ['WORLD_FLAVOR', config.worldSync.flavor],
+      ['WORLD_SYNC_PLUGIN_SOURCE', config.worldSync.pluginSource],
+      ['WORLD_SYNC_NAME', config.worldSync.worldName],
+      ['WORLD_ALLOW_CREATE', config.worldSync.allowCreate ? 'true' : undefined],
+    ].filter(([, v]) => v !== undefined).map(([k]) => k);
+    if (orphans.length > 0) {
+      throw new Error(
+        `${orphans.join(', ')} ${orphans.length === 1 ? 'is' : 'are'} set but ` +
+          `ENABLE_WORLD_SYNC is not true, so no world-sync sidecar is created and every ` +
+          `one of those settings does nothing. Set ENABLE_WORLD_SYNC=true, or remove them.`,
       );
     }
   }
@@ -773,6 +885,28 @@ export function loadConfig(
         DEFAULT_PERSISTENT_STORAGE.enabled,
       mountPath:
         env['PERSISTENT_MOUNT_PATH'] || DEFAULT_PERSISTENT_STORAGE.mountPath,
+    },
+
+    worldSync: {
+      enabled:
+        parseBoolean(env['ENABLE_WORLD_SYNC']) ?? DEFAULT_WORLD_SYNC.enabled,
+      s3Prefix: env['WORLD_SYNC_S3_PREFIX'] || undefined,
+      // ONLY the explicit override. The usual source is the game's own WORLD_NAME, but
+      // that is resolved at synth time by resolveWorldName() rather than baked in here,
+      // because a deploy-time prompt rewrites gameEnvVars AFTER the config is loaded —
+      // see the note on resolveWorldName.
+      worldName: env['WORLD_SYNC_NAME'] || undefined,
+      worldSubdir:
+        env['WORLD_SYNC_SUBDIR'] || DEFAULT_WORLD_SYNC.worldSubdir,
+      syncIntervalSeconds:
+        parseNumber(env['WORLD_SYNC_INTERVAL_SECONDS']) ??
+        DEFAULT_WORLD_SYNC.syncIntervalSeconds,
+      seedForce:
+        parseBoolean(env['WORLD_SYNC_SEED_FORCE']) ?? DEFAULT_WORLD_SYNC.seedForce,
+      flavor: parseWorldFlavor(env['WORLD_FLAVOR']),
+      pluginSource: env['WORLD_SYNC_PLUGIN_SOURCE'] || undefined,
+      allowCreate:
+        parseBoolean(env['WORLD_ALLOW_CREATE']) ?? DEFAULT_WORLD_SYNC.allowCreate,
     },
 
     secretRefs: parseSecretRefs(env['SECRET_REFS']),

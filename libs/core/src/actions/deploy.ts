@@ -1,6 +1,13 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { ActionResult, DiscoveredService, Environment } from '../config/types.js';
 import { resolveCallerIdentity } from '../aws/identity.js';
-import { findUnsatisfiedRequirements, formatRequirementError } from '../config/preflight.js';
+import {
+  findUnsatisfiedRequirements,
+  formatRequirementError,
+  formatMissingWorldError,
+  resolveDeployWorld,
+} from '../config/preflight.js';
 import { runCdk } from '../utils/cdk-runner.js';
 import { logger } from '../utils/logger.js';
 import { secretExists } from '../utils/secrets-runner.js';
@@ -36,6 +43,24 @@ export interface DeployContext {
  *
  * @throws When any requirement is unsatisfied or any referenced secret is absent.
  */
+/**
+ * World names in a service's local library, for the "which world?" error.
+ *
+ * Reads the filesystem rather than DEPLOY_PROMPTS: the prompt list is hand-maintained
+ * and drifts, and an error that names a world the library does not actually hold sends
+ * the reader somewhere useless.
+ */
+function listLibraryWorlds(servicePath: string): string[] {
+  const dir = path.join(servicePath, 'worlds');
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .filter((e) => fs.existsSync(path.join(dir, e.name, `${e.name}.db`)))
+    .map((e) => e.name)
+    .sort();
+}
+
 async function preflight(ctx: DeployContext): Promise<void> {
   const { config } = ctx.service;
   const problems: string[] = [];
@@ -43,6 +68,14 @@ async function preflight(ctx: DeployContext): Promise<void> {
   const missing = findUnsatisfiedRequirements(config, ctx.gameEnvOverrides);
   if (missing.length > 0) {
     problems.push(formatRequirementError(config, missing));
+  }
+
+  // A world-sync service must name the world this deploy will run. Checked here rather
+  // than at load so the service still appears in the menu with no default set, and
+  // checked separately from REQUIRED_ENV_VARS because a DEPLOY_PROMPTS entry satisfies
+  // that check even on a headless deploy where the prompt never runs.
+  if (config.worldSync.enabled && !resolveDeployWorld(config, ctx.gameEnvOverrides)) {
+    problems.push(formatMissingWorldError(config, listLibraryWorlds(ctx.service.path)));
   }
 
   const region = ctx.region ?? config.aws.region;

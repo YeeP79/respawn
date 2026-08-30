@@ -4,6 +4,8 @@ export type {
   ContainerConfig,
   AdditionalPort,
   PersistentStorageConfig,
+  WorldSyncConfig,
+  WorldFlavor,
   NetworkingConfig,
   ScalingConfig,
   ImageConfig,
@@ -42,4 +44,4 @@ export {
   serviceStackName,
 } from '../naming.js';
 
-export { loadConfig } from './loader.js';
+export { loadConfig, resolveWorldName } from './loader.js';

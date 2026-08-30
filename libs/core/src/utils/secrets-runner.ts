@@ -43,6 +43,54 @@ export async function secretExists(opts: {
 }
 
 /**
+ * Reads a secret's plaintext value back.
+ *
+ * Deliberately separate from `secretExists`, which never reads a value: most callers
+ * only need presence, and a helper that returned the value "in case" would put
+ * credentials into logs and transcripts as a side effect of an existence check.
+ * Disclosure should be something a caller asks for by name — which is why this is its
+ * own function, and why the MCP puts it behind its own gate.
+ *
+ * The value comes back on stdout rather than through a file: this is a read, so there is
+ * no argv exposure to avoid (the secret NAME is not sensitive), and the AWS CLI has no
+ * way to write a value anywhere but stdout.
+ *
+ * @returns The plaintext, or undefined when the secret does not exist.
+ */
+export async function readSecret(opts: {
+  store: 'sm' | 'ssm';
+  sourceId: string;
+  jsonKey?: string;
+  region?: string;
+  profile?: string;
+}): Promise<string | undefined> {
+  const args =
+    opts.store === 'ssm'
+      ? ['ssm', 'get-parameter', '--name', opts.sourceId, '--with-decryption',
+         '--query', 'Parameter.Value', '--output', 'text']
+      : ['secretsmanager', 'get-secret-value', '--secret-id', opts.sourceId,
+         '--query', 'SecretString', '--output', 'text'];
+
+  const res = await runAws(args, { profile: opts.profile, region: opts.region });
+  if (res.exitCode !== 0) return undefined;
+  const raw = res.stdout.trim();
+  if (!raw) return undefined;
+  if (!opts.jsonKey) return raw;
+  // A SECRET_REFS entry may name a key inside a JSON secret; return that member, not
+  // the whole document, so the caller gets what the container would receive.
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && opts.jsonKey in (parsed as Record<string, unknown>)) {
+      const v = (parsed as Record<string, unknown>)[opts.jsonKey];
+      return typeof v === 'string' ? v : JSON.stringify(v);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Hands a secret value to the AWS CLI without it ever appearing in argv.
  *
  * The value goes in an owner-only temp file passed as `file://…`, and the file is

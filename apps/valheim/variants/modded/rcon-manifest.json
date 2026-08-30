@@ -1,0 +1,538 @@
+{
+  "service": "valheim-modded",
+  "displayName": "Valheim Server (Modded)",
+  "engine": "other",
+  "notes": "Valheim has NO native remote console. Every command here comes from the ValheimRcon BepInEx plugin (Tristan/ValheimRcon), so this manifest applies ONLY to the modded variant \u2014 the vanilla `valheim` service cannot be administered remotely at all, by anything.\n\nRECONCILED against the running server's own `list` on 2026-08-29, which is the ground truth for what this build accepts. That pass corrected two things authored from upstream documentation: `banSteamId` does not exist on this build, and `teleport` takes coordinates only rather than a steamid plus coordinates. Re-run the `list` query and diff after any plugin upgrade \u2014 the docs and the build have already disagreed once.\n\n`unverified` now means EXECUTION is unconfirmed, not existence: every command's name and signature come from the live `list`, but only `list`, `server_stats` and `time` have actually been run. Clear the flag on a command once it has been executed and seen to take effect.\n\n`server_stats` and `time` carry parsing patterns derived from real replies. The rest deliberately carry none and return their raw text \u2014 inventing regexes for output nobody has seen produces empty fields that read as 'the server told us nothing'.\n\nIdentifiers: player commands take a Steam ID or player name; object commands take the `id:userid` pair `findObjects` reports. Coordinates are Valheim world coordinates (x, z horizontal; y vertical).\n\nOptional flags beyond the required arguments are named in each description but not modelled, because a manifest template requires every placeholder it declares. Use the raw `rcon` tool for those.",
+  "commands": [
+    {
+      "name": "kick",
+      "description": "Disconnect a player. They can rejoin immediately.",
+      "rcon": "kick {player}",
+      "args": {
+        "player": {
+          "description": "Player name or Steam ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "ban",
+      "description": "Ban a player by name or Steam ID. Persists in the ban list.",
+      "rcon": "ban {player}",
+      "args": {
+        "player": {
+          "description": "Player name or Steam ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "unban",
+      "description": "Remove a ban.",
+      "rcon": "unban {player}",
+      "args": {
+        "player": {
+          "description": "Player name or Steam ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "add_admin",
+      "description": "Grant admin privileges. An admin can use in-game console commands, so this is a privilege escalation.",
+      "rcon": "addAdmin {steamid}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "remove_admin",
+      "description": "Revoke admin privileges.",
+      "rcon": "removeAdmin {steamid}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "add_permitted",
+      "description": "Add a player to the permitted (allow) list.",
+      "rcon": "addPermitted {steamid}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "remove_permitted",
+      "description": "Remove a player from the permitted list. If the list is in use, this locks them out.",
+      "rcon": "removePermitted {steamid}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "disconnect_all",
+      "description": "Disconnect every connected player at once. Ends the session for everyone.",
+      "rcon": "disconnectAll",
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "find_player",
+      "description": "Look up one player and show their details.",
+      "rcon": "findPlayer {player}",
+      "args": {
+        "player": {
+          "description": "Player name or Steam ID",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "give",
+      "description": "Give an item to a player. Accepts further flags (-quality, -variant, -durability) via the raw rcon tool.",
+      "rcon": "give {steamid} {item} -count {count}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID of the recipient",
+          "type": "string"
+        },
+        "item": {
+          "description": "Valheim item prefab name, e.g. Wood or SwordIron",
+          "type": "string"
+        },
+        "count": {
+          "description": "How many",
+          "type": "int"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "heal",
+      "description": "Restore health to a player.",
+      "rcon": "heal {steamid} {value}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        },
+        "value": {
+          "description": "Health to restore",
+          "type": "int"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "damage",
+      "description": "Deal damage to a player. Can kill them, which in Valheim means a corpse run and skill loss.",
+      "rcon": "damage {steamid} {amount}",
+      "args": {
+        "steamid": {
+          "description": "Steam64 ID",
+          "type": "string"
+        },
+        "amount": {
+          "description": "Damage to deal",
+          "type": "int"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "teleport",
+      "description": "Teleport the player to world coordinates. NOTE the live build takes coordinates ONLY \u2014 no player id \u2014 so it acts on the player the plugin resolves, not one you choose. Reconciled against the server's own `list`; upstream docs describe a steamid argument this build does not accept.",
+      "rcon": "teleport {x} {y} {z}",
+      "args": {
+        "x": {
+          "description": "World X",
+          "type": "float"
+        },
+        "y": {
+          "description": "World Y (height)",
+          "type": "float"
+        },
+        "z": {
+          "description": "World Z",
+          "type": "float"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "spawn",
+      "description": "Spawn an object or creature at coordinates. Extra flags (-count, -level, -tamed, -rotation, -radius) are available via the raw rcon tool.",
+      "rcon": "spawn {prefab} {x} {y} {z}",
+      "args": {
+        "prefab": {
+          "description": "Prefab name, e.g. Deer or Greydwarf",
+          "type": "string"
+        },
+        "x": {
+          "description": "World X",
+          "type": "float"
+        },
+        "y": {
+          "description": "World Y (height)",
+          "type": "float"
+        },
+        "z": {
+          "description": "World Z",
+          "type": "float"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "find_objects",
+      "description": "Find objects matching a filter. Pass a filter such as '-prefab Beehive -near 100' or '-tag mytag'.",
+      "rcon": "findObjects {filter}",
+      "args": {
+        "filter": {
+          "description": "Search flags: -near <x> <y> <z> <radius>, -zone <x> <y>, -prefab, -creator, -id <id:userid>, -tag, -tag-old, -detailed",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "delete_objects",
+      "description": "Delete objects matching a filter. IRREVERSIBLE and unbounded \u2014 a loose filter can delete a base. Find first with find_objects and delete by the exact ids it returns.",
+      "rcon": "deleteObjects {filter}",
+      "args": {
+        "filter": {
+          "description": "Selection flags: -near <x> <y> <z> <radius>, -zone <x> <y>, -prefab, -creator, -id <id:userid>, -tag, -force. Required: never run this bare.",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "modify_object",
+      "description": "Change an object's properties (position, rotation, health, tag).",
+      "rcon": "modifyObject {id} {changes}",
+      "args": {
+        "id": {
+          "description": "Object id in id:userid form, from find_objects",
+          "type": "string"
+        },
+        "changes": {
+          "description": "Flags: -position <x> <y> <z>, -rotation <x> <y> <z>, -health, -tag, -prefab, -force",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "say",
+      "description": "Broadcast a chat message to every player.",
+      "rcon": "say {message}",
+      "args": {
+        "message": {
+          "description": "Message text",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "show_message",
+      "description": "Show a centred on-screen notification to every player. More intrusive than chat \u2014 use for shutdown warnings.",
+      "rcon": "showMessage {message}",
+      "args": {
+        "message": {
+          "description": "Message text",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "ping",
+      "description": "Place a map ping at coordinates, visible to players.",
+      "rcon": "ping {x} {y} {z}",
+      "args": {
+        "x": {
+          "description": "World X",
+          "type": "float"
+        },
+        "y": {
+          "description": "World Y (height)",
+          "type": "float"
+        },
+        "z": {
+          "description": "World Z",
+          "type": "float"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "show_container",
+      "description": "Show the contents of a container.",
+      "rcon": "showContainer {id}",
+      "args": {
+        "id": {
+          "description": "Container id in id:userid form, from find_objects",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "add_item_to_container",
+      "description": "Put an item into a container.",
+      "rcon": "addItemToContainer {id} {item} -count {count}",
+      "args": {
+        "id": {
+          "description": "Container id in id:userid form",
+          "type": "string"
+        },
+        "item": {
+          "description": "Item prefab name",
+          "type": "string"
+        },
+        "count": {
+          "description": "How many",
+          "type": "int"
+        }
+      },
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "remove_item_from_container",
+      "description": "Take an item out of a container. Destroys it rather than moving it anywhere.",
+      "rcon": "removeItemFromContainer {id} {selector}",
+      "args": {
+        "id": {
+          "description": "Container id in id:userid form",
+          "type": "string"
+        },
+        "selector": {
+          "description": "Either -index <n> or -item <name>, plus optional -count / -force",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "clear_container",
+      "description": "Empty a container completely. IRREVERSIBLE \u2014 a player's chest contents are gone.",
+      "rcon": "clearContainer {id}",
+      "args": {
+        "id": {
+          "description": "Container id in id:userid form",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "start_event",
+      "description": "Trigger a random event (a raid) at coordinates. Names come from the events_list query.",
+      "rcon": "startEvent {event} {x} {y} {z}",
+      "args": {
+        "event": {
+          "description": "Event name, from events_list",
+          "type": "string"
+        },
+        "x": {
+          "description": "World X",
+          "type": "float"
+        },
+        "y": {
+          "description": "World Y (height)",
+          "type": "float"
+        },
+        "z": {
+          "description": "World Z",
+          "type": "float"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "stop_event",
+      "description": "End the active random event.",
+      "rcon": "stopEvent",
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "save",
+      "description": "Force a world save. Worth running before a deliberate restart \u2014 the world-sync sidecar mirrors what is ON DISK, so an unsaved session is not in the mirror.",
+      "rcon": "save",
+      "mod": "ValheimRcon",
+      "unverified": true
+    },
+    {
+      "name": "add_global_key",
+      "description": "Set a world progression flag (e.g. a boss defeat). Changes what spawns and what the world does, globally and for everyone.",
+      "rcon": "addGlobalKey {key}",
+      "args": {
+        "key": {
+          "description": "Global key name, e.g. defeated_eikthyr",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "remove_global_key",
+      "description": "Clear a world progression flag. Can undo recorded progression for the whole server.",
+      "rcon": "removeGlobalKey {key}",
+      "args": {
+        "key": {
+          "description": "Global key name",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    },
+    {
+      "name": "console_command",
+      "description": "Run an arbitrary server console command. The escape hatch for anything this manifest does not model \u2014 and correspondingly unbounded.",
+      "rcon": "consoleCommand {command}",
+      "args": {
+        "command": {
+          "description": "Raw server console command",
+          "type": "string"
+        }
+      },
+      "mod": "ValheimRcon",
+      "danger": true,
+      "unverified": true
+    }
+  ],
+  "cvars": [],
+  "queries": [
+    {
+      "name": "list",
+      "description": "The plugin's own list of available commands. GROUND TRUTH for this manifest: run it first on a new deploy and reconcile anything that differs, since every command here was authored from documentation rather than from the running build.",
+      "rcon": "list"
+    },
+    {
+      "name": "players",
+      "description": "Online players with their positions and zones.",
+      "rcon": "players"
+    },
+    {
+      "name": "server_stats",
+      "description": "Player count, FPS and memory usage.",
+      "rcon": "serverStats",
+      "singles": {
+        "online": "Online\\s+(\\d+)",
+        "fps": "FPS\\s+([\\d.]+)",
+        "day": "Day\\s+(\\d+)",
+        "objects": "Objects\\s+(\\d+)",
+        "dead_objects": "Dead objects\\s+(\\d+)",
+        "mono_mb": "Mono\\s+(\\d+)MB",
+        "heap_mb": "Heap\\s+(\\d+)MB"
+      }
+    },
+    {
+      "name": "time",
+      "description": "Current in-game time and day number.",
+      "rcon": "time",
+      "singles": {
+        "seconds": "time:\\s*([\\d.]+)\\s*sec",
+        "day": "Day:\\s*(\\d+)"
+      }
+    },
+    {
+      "name": "adminlist",
+      "description": "Players with admin privileges.",
+      "rcon": "adminlist"
+    },
+    {
+      "name": "banlist",
+      "description": "Banned players.",
+      "rcon": "banlist"
+    },
+    {
+      "name": "permitted",
+      "description": "Players on the permitted (allow) list.",
+      "rcon": "permitted"
+    },
+    {
+      "name": "global_keys",
+      "description": "World progression flags currently set.",
+      "rcon": "globalKeys"
+    },
+    {
+      "name": "events_list",
+      "description": "Random events available to start_event.",
+      "rcon": "eventsList"
+    },
+    {
+      "name": "current_event",
+      "description": "The random event currently running, if any.",
+      "rcon": "currentEvent"
+    },
+    {
+      "name": "logs",
+      "description": "The last few lines of server log. For anything longer use the server_logs tool, which reads CloudWatch.",
+      "rcon": "logs"
+    }
+  ]
+}
