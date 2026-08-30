@@ -74,6 +74,50 @@ mod-created objects. Re-run with --assume-vanilla if you know it is unmodded."
   fi
 }
 
+# The same destruction as above, between two MODDED variants — which the flavor check
+# cannot see, because both sides say `modded`. A world climbing from the QoL set to the
+# overhaul set is safe (the target has every plugin the save has met); the same move in
+# reverse deletes every object those plugins created, because Valheim drops objects whose
+# prefab it cannot resolve and rewrites the object stream without them.
+#
+# The sidecar makes this comparison again at seed time and is the side that cannot be
+# bypassed by copying files into the bucket. This one exists so the operator finds out at
+# the keyboard rather than in a log after the fact.
+assert_plugins_compatible() {
+  local stamp="$1" payload="$SVC_DIR/mods" missing="" dll
+  [ -f "$stamp" ] || return 0
+
+  # Unknown is reported, not assumed safe either way: refusing would block a legitimate
+  # publish on a payload nobody needs locally, and staying silent would imply a check ran.
+  if [ ! -d "$payload" ]; then
+    echo "NOTE: $payload does not exist, so '$VARIANT' plugin set could not be compared here." >&2
+    echo "      Run 'pnpm valheim:mods:fetch $VARIANT' to check it now; the sidecar checks" >&2
+    echo "      again at seed time regardless." >&2
+    return 0
+  fi
+
+  # world_flavor falls back to a regex when jq is absent, which works for a scalar and
+  # does not for an array. Saying the check did not run beats a silent pass: an empty
+  # result here is indistinguishable from "nothing world-altering ever ran".
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "NOTE: jq is not installed, so the plugin comparison was skipped." >&2
+    echo "      The sidecar makes the same check at seed time and will refuse there." >&2
+    return 0
+  fi
+
+  while IFS= read -r dll; do
+    [ -n "$dll" ] || continue
+    [ -f "$payload/$dll" ] || missing="$missing  $dll
+"
+  done < <(jq -r '.mods_world_altering[]? // empty' "$stamp" 2>/dev/null)
+
+  [ -z "$missing" ] || die "REFUSING: this world has run with world-altering plugins that '$VARIANT' does not carry:
+$missing
+Every object those plugins created would be deleted the first time it loads there, and
+Valheim stores objects as a continuous stream, so that damage is usually unrepairable.
+Publish it to a variant whose mod set includes them, or add them to '$VARIANT'."
+}
+
 
 
 # S3 prefix from the service's own .env, so the scripts and the deployed sidecar cannot

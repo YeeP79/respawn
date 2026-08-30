@@ -62,7 +62,14 @@ export class WorldSyncSidecar extends Construct {
       image: ecs.ContainerImage.fromAsset(syncDir),
       essential: false,
       cpu: 64,
-      memoryLimitMiB: 128,
+      // 128 MiB is enough to move a world save, and was not enough to move a large mod
+      // set: `aws s3 sync` over valheim-overhaul's 527 MB of plugins was OOM-killed here,
+      // which the sidecar correctly turned into "not signalling ready" rather than a
+      // silently unmodded server. sync.sh now bounds the transfer's concurrency so its
+      // memory no longer scales with the payload; this is the headroom that goes with it.
+      // Taken from the task total, so the game container has correspondingly less — which
+      // is why it is 256 and not simply a large round number.
+      memoryLimitMiB: 256,
       environment: {
         WORLD_S3_PREFIX: props.s3Prefix,
         WORLD_NAME: props.worldName,

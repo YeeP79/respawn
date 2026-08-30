@@ -44,7 +44,7 @@ PLUGIN_DIR="${PLUGIN_DIR:-/config/bepinex/plugins}"
 # /opt, which no sidecar mounts, so a config written to /config was never read and the
 # plugin ran with an empty password — listening and rejecting every auth. That job moved
 # to the game container's PRE_SERVER_RUN_HOOK, which is the only place with both halves.
-# See apps/valheim/variants/modded/respawn-rcon-config.sh.
+# See apps/valheim/respawn-rcon-config.sh.
 
 # Trailing slash is a per-caller coin flip and doubles into an empty S3 key segment.
 PREFIX="${WORLD_S3_PREFIX%/}"
@@ -113,6 +113,23 @@ plugin_list_json() {
 sync_plugins() {
   [ -n "$PLUGIN_SOURCE" ] || return 0
   mkdir -p "$PLUGIN_DIR"
+
+  # Bound the transfer's memory, because the PAYLOAD is unbounded and this container is
+  # not. `aws s3 sync` holds roughly (concurrency x chunk size) of buffers on top of the
+  # CLI's own ~80 MB, so the default 10 x 8 MB OOM-kills a 128 MiB sidecar as soon as a
+  # mod set gets large — measured on valheim-overhaul's 527 MB of plugins, where the
+  # kernel killed the sync and the sidecar correctly refused to signal ready:
+  #
+  #   sync.sh: line 113: 8 Killed   aws s3 sync ... --delete --only-show-errors
+  #
+  # Raising the container limit alone would only move the cliff to the next mod set. With
+  # these settings the sidecar's memory is roughly constant in the size of the payload,
+  # which is the property that actually makes it safe to publish an arbitrary mod list.
+  export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-5}"
+  aws configure set default.s3.max_concurrent_requests 2
+  aws configure set default.s3.multipart_chunksize 4MB
+  aws configure set default.s3.max_queue_size 100
+
   # --delete so REMOVING a mod from the published set actually removes it here. Without
   # it a plugin would linger on the volume for ever and the server would keep loading a
   # mod nobody thinks is installed — which then writes its prefabs into the world.
@@ -122,6 +139,9 @@ sync_plugins() {
     # Booting a MODDED server with the wrong plugin set is worse than not booting: the
     # world gets played, and whatever the mods do or fail to do is written into it.
     log "ERROR could not sync plugins from $PREFIX/$PLUGIN_SOURCE"
+    log "  If the shell reported 'Killed', the transfer was OOM-killed: this container has"
+    log "  a hard memory limit and the plugin payload is larger than it can buffer. Raise"
+    log "  the world-sync sidecar's memoryLimitMiB, or publish a smaller mod set."
     return 1
   fi
 }
@@ -164,6 +184,28 @@ plugin_split_json() {
     done < <(find "$PLUGIN_DIR" -maxdepth 1 -name '*.dll' 2>/dev/null)
   fi
   printf '%b' "$out" | jq -R . | jq -s 'map(select(. != ""))'
+}
+
+# World-altering plugins the incoming save has run with that THIS server does not have,
+# one per line. Empty output means loading it here destroys nothing.
+#
+# The vanilla/modded flavor below is a two-state answer to a question that stopped having
+# two states the moment there was more than one modded variant. `modded` -> `modded` looks
+# identical whether a world is climbing from the QoL set to the overhaul set (safe: the
+# target has every plugin the save has met) or descending the other way (destructive: the
+# target is missing the plugins whose prefabs are in the file, and Valheim deletes objects
+# whose prefab it cannot resolve). Comparing the sets answers it directly, and names the
+# plugin rather than the variant, so the message is actionable.
+#
+# A stamp written before mods_world_altering existed yields nothing here and falls through
+# to the flavor check — the same honest degradation the stamp makes everywhere else.
+missing_altering_plugins() {
+  local stamp="$1" dll
+  [ -f "$stamp" ] || return 0
+  while IFS= read -r dll; do
+    [ -n "$dll" ] || continue
+    [ -f "$PLUGIN_DIR/$dll" ] || echo "$dll"
+  done < <(jq -r '.mods_world_altering[]? // empty' "$stamp" 2>/dev/null)
 }
 
 # Append this run to the save's stamp, creating it when absent. Flavor is one-way: once
@@ -295,6 +337,19 @@ seed_from_inbox() {
       log "REFUSING to seed: '$WORLD_NAME' is stamped MODDED and this is a vanilla server."
       log "  Loading it here would destroy every object its mods created, permanently."
       log "  Deploy it to the modded service instead."
+      rm -rf "$tmp"
+      return 0
+    fi
+    # Same destruction, one rung down instead of all the way: both servers are `modded`,
+    # so the flavor check above waves this through.
+    local missing_plugins
+    missing_plugins="$(missing_altering_plugins "$inbox_stamp")"
+    if [ -n "$missing_plugins" ]; then
+      log "REFUSING to seed: '$WORLD_NAME' has run with world-altering plugins this server"
+      log "  does not have:"
+      printf '%s\n' "$missing_plugins" | while IFS= read -r p; do log "    $p"; done
+      log "  Every object those plugins created would be deleted on load, permanently."
+      log "  Send it to a variant whose mod set includes them, or add them to this one."
       rm -rf "$tmp"
       return 0
     fi

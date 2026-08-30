@@ -42,6 +42,7 @@ require_local_pair "$dir" "$world"
 # Provenance before anything else: this check prevents DESTROYING content, as against
 # the clock check below which only prevents losing progress.
 assert_flavor_compatible "$dir/$world.$STAMP_EXT" "$target_flavor" "$assume_vanilla"
+assert_plugins_compatible "$dir/$world.$STAMP_EXT"
 local_clock="$(world_clock "$dir/$world.db")" || die "'$dir/$world.db' has no readable header"
 
 # Refuse to push over a session that has been played since this copy was taken. The
