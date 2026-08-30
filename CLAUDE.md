@@ -699,7 +699,9 @@ reports the rest under `unavailableHere` (declared, but not here, and what it ne
 because "not on this server" and "never declared" are different answers, and only the
 first tells you which variant to run it on. The one-line family summary counts
 **post-gate** for the same reason: it read "35 commands" on a server whose body listed 30
-and gated 5, and the summary is the half people scan. `run_command` refuses a gated command outright,
+and gated 5, and the summary is the half people scan. `list_services` carries the gate as
+its own token too — `commands:30(+5 need mods)` — on the same reasoning that gave drift
+its token: hiding it behind a per-service call defeats the point of a listing. `run_command` refuses a gated command outright,
 which matters precisely because the console would have answered "executed". A service with
 no `mods.lock` gates **nothing**: unknown must not read as unavailable, or every non-Valheim
 service would lose its whole command surface.

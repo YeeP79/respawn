@@ -1719,7 +1719,7 @@ server.registerTool(
         // HERE — hiding it behind a per-service call defeats the point of the listing.
         tags.push(
           f.commands.available
-            ? `commands:${f.commands.commandCount}`
+            ? `commands:${f.commands.commandCount}${f.commands.gated > 0 ? `(+${f.commands.gated} need mods)` : ''}`
             : f.commands.kind === 'drift'
               ? 'commands:UNREACHABLE(drift)'
               : f.commands.kind === 'no-manifest'
@@ -1738,6 +1738,8 @@ server.registerTool(
       '',
       'Every service also supports lifecycle (synth/diff/deploy/push/scale/check_updates) ' +
         'and observability (server_health/server_logs/server_metrics/container_stats).',
+      'commands:N(+M need mods) means M more are declared but need mods this service does ' +
+      'not carry — get_server_options names them and what each needs.\n' +
       'commands:none means no mid-game command surface — get_server_options says whether ' +
         'that is a missing manifest or a game with no remote console at all.',
     );
