@@ -255,10 +255,36 @@ COPY apps/css/respawn-init.sh /app/respawn-init.sh   # not ./respawn-init.sh
 Also check the base image's `USER` before adding `RUN chmod +x` — `jives/hlds` runs as
 `steam` and cannot chmod a root-owned `COPY`. Invoke via `ENTRYPOINT ["/bin/sh", ...]` instead.
 
+### Deleting a service from the repo blocks EVERY deploy until its stack is gone
+
+The shared stack owns one ECR repository per service. Remove a service's directory (or
+rename its `SERVICE_NAME`, which is the same thing) and the shared stack stops declaring
+that repository — so the next deploy of ANY service tries to delete it, CloudFormation
+refuses because the still-existing service stack holds an export on it, and the shared
+stack rolls back:
+
+```
+Delete canceled. Cannot delete export
+  respawn-dev-shared:ExportsOutputFnGetAttEcrvalheimmoddedRepository...Arn
+  as it is in use by respawn-dev-valheim-modded.
+❌ respawn-dev-shared failed: UPDATE_ROLLBACK_COMPLETE
+```
+
+Every deploy touches the shared stack first, so this is **fleet-wide**, not scoped to the
+service you removed. Nothing can deploy until it clears. The rollback is clean — the
+existing fleet keeps running — but the new service's ECR repository is never created.
+
+**So a service rename is: destroy the old stack FIRST, then deploy.** That is the reverse
+of the safe-looking order, and the safe-looking order deadlocks. If the old stack cannot
+be destroyed yet (its volume holds something you still need), keep the old service
+directory in the repo until it can — the shared stack only cares that something still
+declares the repository.
+
 ### `pnpm respawn:*` scripts hardcode a `--service` list
 
-The batch scripts in `package.json` name each service explicitly — currently all 16,
-counting each variant separately (`ut99` and `ut99-vanilla` are two entries). It is easy to
+The batch scripts in `package.json` name each service explicitly — currently all 24,
+counting each variant separately (`ut99` and `ut99-vanilla` are two entries; Valheim
+alone is six). It is easy to
 forget when adding a server or a variant, and a missing name is skipped silently. Add yours,
 or use the interactive `pnpm respawn` menu, which discovers them properly.
 
@@ -478,11 +504,30 @@ necessity, and a world save is the entire map, every base and chest in it.
 reproducible** — there is no manifest to refetch it from. It is the master copy and
 needs its own backup.
 
-### Modded and vanilla are separate services, and a save remembers where it ran
+### The Valheim variants are a lattice, and a save remembers where it ran
 
-`apps/valheim` is two variants — `valheim` (vanilla) and `valheim-modded` (BepInEx via
-`GAME_ENV_BEPINEX=true`). Separate services means separate stacks, so **separate EFS
-volumes and disjoint S3 prefixes**; neither can reach the other's world by construction.
+`apps/valheim` is six variants. Each is a **ruleset** — which mods load, what the server
+can be driven with — and NOT a world: which world runs on one is a separate, deploy-time
+choice, and the same save can sit in several variants' libraries at once.
+
+| Variant | Carries | Client install | Worlds stamped |
+|---|---|---|---|
+| `valheim` | nothing (crossplay on, Xbox can join) | none | `vanilla` |
+| `valheim-admin` | rcon only | none | `vanilla` |
+| `valheim-qol` | + convenience mods | small | `vanilla` |
+| `valheim-loot` | + EpicLoot, CLLC, Drop/Spawn That | ~40 MB | **`modded`** |
+| `valheim-build` | + OdinArchitect, OdinsKingdom, PlantEverything | ~50 MB | **`modded`** |
+| `valheim-overhaul` | the union of both, plus the Therzie suite | ~500 MB | **`modded`** |
+
+They form a lattice rather than a line: `qol → loot → overhaul` and `qol → build →
+overhaul`, with `loot` and `build` siblings that a world cannot move between. That shape
+is not documentation, it is **expressed in the manifests** — `variants/overhaul/mods.txt`
+includes `../loot/mods.txt` and `../build/mods.txt` rather than restating either, so a
+change to a lower rung reaches the top automatically and the three cannot drift into a
+state where a world can no longer climb.
+
+Separate services means separate stacks, so **separate EFS volumes and disjoint S3
+prefixes**; no variant can reach another's world by construction.
 
 That is not enough on its own, because a save can be carried between them by hand. So
 every save carries a provenance stamp, `<world>.respawn.json`, written by the sidecar
@@ -490,11 +535,23 @@ every save carries a provenance stamp, `<world>.respawn.json`, written by the si
 
 ```json
 { "world": "respawn-world", "flavor": "modded", "mods": ["EpicLoot.dll"],
-  "history": [ { "service": "valheim-modded", "flavor": "modded", "at": "…", "mods": […] } ] }
+  "history": [ { "service": "valheim-loot", "flavor": "modded", "at": "…", "mods": […] } ] }
 ```
 
-**The rule is one-way: `vanilla` → `modded` is allowed and stamps the save permanently;
-a save stamped `modded` is refused by the vanilla server for ever.** That asymmetry
+**Flavor alone stopped being sufficient the moment more than one variant was modded.**
+`modded` → `modded` looks identical whether a world is climbing from `qol` to `overhaul`
+(safe — the target has every plugin the save has met) or descending the other way
+(destructive — the target lacks the plugins whose prefabs are in the file). So the guard
+compares the **plugin sets**: a seed is refused when the incoming stamp's
+`mods_world_altering` names a plugin this server does not have, and the refusal names the
+plugin rather than the variant. Checked in `sync.sh` at seed time (the side that cannot be
+bypassed by copying files into the bucket) and in `assert_plugins_compatible` at publish
+time (so the operator finds out at the keyboard). A stamp written before
+`mods_world_altering` existed yields nothing and falls through to the flavor check below —
+the same honest degradation the stamp makes everywhere else.
+
+**The flavor rule still holds underneath it: `vanilla` → `modded` is allowed and stamps
+the save permanently; a save stamped `modded` is refused by the vanilla server for ever.** That asymmetry
 mirrors the physical fact — mod-added objects are ZDOs carrying the mod's prefab hashes,
 and loading them without the mod makes Valheim destroy those objects and rewrite a
 continuous object stream that usually cannot be repaired. Adding mods costs nothing;
@@ -509,11 +566,74 @@ is not the same as known-clean — and `--assume-vanilla` is the operator assert
 `write_stamp` takes `modded` from whichever side carries it, so a later vanilla run
 cannot launder a modded save; it only appends to `history`.
 
+**A sidecar's memory limit must not be outgrown by the payload it moves.** `world-sync`
+ran at a hard 128 MiB, which is ample for a world save and was not ample for a large mod
+set: `aws s3 sync` over `valheim-overhaul`'s 527 MB of plugins was OOM-killed by the
+kernel, and the only clue was a shell line in the log —
+
+```
+sync.sh: line 113: 8 Killed   aws s3 sync ... --delete --only-show-errors
+[world-sync] ERROR could not sync plugins from s3://.../valheim-overhaul/plugins
+[world-sync] not signalling ready — the game will not start
+```
+
+The fail-closed design worked exactly as intended (a modded server was held back rather
+than coming up unmodded), but "could not sync" pointed at S3 or IAM rather than at a
+memory limit, which is where the time goes.
+
+Both halves of the fix matter. `sync.sh` now caps the transfer's concurrency and chunk
+size (`max_concurrent_requests 2`, `multipart_chunksize 4MB`), because `aws s3 sync` holds
+roughly concurrency x chunk size of buffers on top of the CLI's own ~80 MB — so the
+default 10 x 8 MB cannot fit in 128 MiB whatever the payload. That makes the sidecar's
+memory roughly **constant in the size of the mod set**, which is the property that makes
+publishing an arbitrary mod list safe. The limit was also raised to 256 MiB for headroom.
+Raising the limit alone would only have moved the cliff to the next mod set, and every
+MiB given to a sidecar is taken from the task total and therefore from the game.
+
 **Mods are content, not state.** `mods.txt` is tracked and `mods/` is gitignored and
 rebuildable — the `content/` relationship, not the `worlds/` one. Both the fetch and the
 publish use `--delete`, as does the sidecar's sync: without that, removing a line from
 `mods.txt` leaves the plugin on the volume and the server keeps loading a mod nobody
 believes is installed, which then writes its prefabs into the world.
+
+**A manifest can `include` another, and the effective set is locked.** Shared sets live at
+the project level — `mods-admin.txt` (rcon, the floor for every modded variant) and
+`mods-qol.txt` (convenience, layered on it) — so a set used by five variants is declared
+once. Includes are resolved recursively and a file reached twice contributes once, which
+is what lets `overhaul` include both siblings. Two rules keep the merge honest: two
+manifests naming the same package must agree on the version, and `world-safe` is dropped
+unless **every** listing asserts it. `fetch-mods.sh` then writes the flat resolved set to
+the variant's **tracked** `mods.lock` — the `mapcycles/` relationship, generated and
+committed so drift shows up as a diff, and the one authoritative list a player's modpack
+has to match.
+
+**`mods-qol.txt` must stay Jotunn-free, and that is load-bearing.** Its variants' worlds
+stay stamped `vanilla` only while every plugin in it is world-safe, and Jotunn ships four
+embedded asset bundles and calls `AddPrefab` — it cannot honestly be asserted world-safe,
+and the error directions are not symmetric: wrongly marking it safe lets a modded world go
+back to vanilla and be shredded, wrongly marking it unsafe only costs portability. One
+unflagged plugin added to that file makes every world on **every** variant including it
+permanently un-returnable. `MSchmoecker/MultiUserChest` is what this costs — it declares
+Jotunn, so it lives in the content rungs instead.
+
+**Thunderstore dependencies are checked, never auto-fetched.** A package nobody declared
+is a package nobody assessed, and `world-safe` is an operator assertion — auto-fetching
+would silently add plugins with no assertion attached, and the conservative default would
+then quietly make every world there world-altering. So `fetch-mods.sh` reads each
+package's own `manifest.json`, and refuses with the exact lines to add. This is not
+theoretical: nothing had ever hit it because `ValheimRcon`'s only dependency is BepInEx,
+which the image provides — the first content rung needed `Jotunn` + `JsonDotNET`, and the
+building rung turned out to need `HookGenPatcher`, which nobody had noticed.
+
+**A BepInEx PATCHER cannot be delivered by this pipeline, and the fetcher refuses one.**
+Patchers load from `BepInEx/patchers/` during the preloader phase, and the upstream
+image's `write_bepinex_config` syncs exactly one directory (`$config_path/plugins/` → the
+live plugin dir) with no patcher equivalent. A patcher flattened in with the plugins is
+copied where nothing reads it: it never runs, the mod requiring it fails to load, and
+BepInEx logs that and carries on — a healthy-looking server missing a mod. This is why
+`MathiasDecrock/PlanBuild` is absent from `valheim-build`. Adding the capability means a
+second published prefix, a second sidecar sync, and a copy into `/opt` from the
+`PRE_SERVER_RUN_HOOK` shim.
 
 Plugins are mirrored **one way** (S3 → volume) before the game starts, and a failed
 plugin sync deliberately never signals ready — the game container's dependency holds it
@@ -528,10 +648,11 @@ and plugins silently do not load — a healthy-looking, entirely unmodded server
 
 Vanilla Valheim has **no remote console at all**: an admin must be a logged-in player,
 and on a dedicated server only Group A commands (kick/ban/unban/banned/save/ping) work.
-So `valheim` cannot be administered mid-game by anything, ever. That is a second,
-independent reason the modded variant exists.
+So `valheim` cannot be administered mid-game by anything, ever. That is the entire reason
+`valheim-admin` exists: vanilla gameplay, nothing for a player to install, and a server the
+MCP can still drive.
 
-`valheim-modded` gets it from `Tristan/ValheimRcon`, which adds an rcon listener — and
+Every modded variant gets it from `Tristan/ValheimRcon` (via `mods-admin.txt`), which adds an rcon listener — and
 the fleet already speaks that: `ENABLE_RCON_CONTROL` + `RCON_PROTOCOL=source` hands the
 whole existing rcon-control sidecar and MCP surface to Valheim with no new transport.
 
@@ -548,6 +669,40 @@ Two things that are easy to get wrong:
   first-ever boot takes the generate path, and it says so in the log. Failure is
   fail-closed by the plugin's own design — an empty password disables it, so a config that
   cannot be written means no rcon, never an unauthenticated listener.
+
+**A mod's console commands are reachable, mostly useless, and silent about both.**
+ValheimRcon's `consoleCommand` executes anything the game's console accepts, so a plugin
+that registers a console command is in principle drivable. Three measurements against a
+live `valheim-loot` task (2026-08-30) bound what that is worth:
+
+- **The reply carries no information.** `consoleCommand` answers `Command 'X' executed.`
+  whether X succeeded, failed, or does not exist. Output goes to the container's stdout,
+  so the result is read from `server_logs` afterwards — and a typo is indistinguishable
+  from success. This is why mod commands are modelled as commands and never as queries:
+  there is no reply to parse.
+- **EpicLoot's 30 console commands do not work on a dedicated server.** `el-help` lists
+  them (`magicitem`, `bounties`, `lucktest`, `gotomerchant`, …), which makes them look
+  available; `lucktest Greydwarf 1.0` answers `'lucktest' is not valid in the current
+  context.` They are player-context commands and a dedicated server has no player. They
+  are deliberately NOT in the manifest — declaring them from that help output would have
+  produced a surface that reports success on every call and does nothing.
+- **Drop That and Spawn That are the real additions.** `dropthat:reload` re-reads loot
+  configuration without a restart (verified), plus two config-dump commands and the two
+  `spawnthat:` commands that take an explicit spawn id rather than the player's position.
+  CreatureLevelAndLootControl, Jotunn, MultiUserChest, TargetPortal, PlantEasily,
+  QuickStackStore, AzuCraftyBoxes and AAA_Crafting register **no** console commands.
+
+**`requires` on a manifest entry is what keeps one manifest honest across six variants.**
+It lists the Thunderstore packages an entry needs, matched against the variant's tracked
+`mods.lock`. `get_server_options` filters the surface to what that server actually has and
+reports the rest under `unavailableHere` (declared, but not here, and what it needs) —
+because "not on this server" and "never declared" are different answers, and only the
+first tells you which variant to run it on. The one-line family summary counts
+**post-gate** for the same reason: it read "35 commands" on a server whose body listed 30
+and gated 5, and the summary is the half people scan. `run_command` refuses a gated command outright,
+which matters precisely because the console would have answered "executed". A service with
+no `mods.lock` gates **nothing**: unknown must not read as unavailable, or every non-Valheim
+service would lose its whole command surface.
 
 **`world-safe` in `mods.txt` is what stops admin tooling quarantining a world.** A plugin
 that opens a socket and runs commands writes no prefabs, so a world it ran under is still
@@ -639,8 +794,13 @@ fully working service made it read as misconfigured.
 
 ### A mod's config file is written by the game container, not by a sidecar
 
-`apps/valheim/variants/modded` builds its own image (`FROM ghcr.io/lloesche/valheim-server`)
-for exactly one reason: the rcon plugin's password. The plugin is config-**file** driven, so
+Every modded Valheim variant builds its own image (`FROM ghcr.io/lloesche/valheim-server`)
+for exactly one reason: the rcon plugin's password. Their Dockerfiles are **byte-identical
+on purpose** and COPY one shared shim from the project level, `apps/valheim/respawn-rcon-config.sh` —
+variants differ in their mod set, which is published to S3 and synced onto the volume at
+boot, and none of that is baked into an image. (Identical content means an identical
+content-hash tag, but ECR repositories are per service, so each still builds and pushes
+into its own: the tag dedupes within a repository, not across them.) The plugin is config-**file** driven, so
 the value cannot be a `GAME_ENV_` (plaintext in the task definition) — it has to be written
 into a file, from an ECS secret, inside the container.
 
