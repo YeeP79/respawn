@@ -1,0 +1,47 @@
+# --- Respawn: L4D2 STABILITY ---------------------------------------------------
+# Crash and correctness fixes that apply at ANY player count. Nothing here changes
+# how the game plays; each one stops something from being broken.
+#
+# This tier exists because the curated pack is roughly two-thirds fixes, and mixing
+# them in with gameplay mods hides that a "modded" L4D2 server is mostly repair
+# work. Separating them means a variant can take the repairs without the flavour.
+#
+# include ../mods/mods-platform.txt   <- assumed by every variant; not repeated here
+#
+# All versions (pack) unless noted.
+
+# Crash reporting. Worth having first on a server nobody is watching, because
+# without it a crash is an unexplained process death.
+#
+# *** BROKEN ON THIS BASE IMAGE — S11, 2026-08-30 ***
+#   [SM] Unable to load extension "accelerator.ext":
+#        bin/libstdc++.so.6: version `GLIBCXX_3.4.21' not found
+# It needs a build matching left4devops/l4d2's libstdc++, or it must be dropped
+# rather than shipped. A crash reporter that silently fails to load is worse than
+# none: it is a false assurance about the one thing nobody is watching.
+# sm:alliedmods/accelerator 2.6.0-git165
+
+# Loads assembly patches from config; several fixes below depend on it.
+sm:alliedmods/source-scramble-manager 1.2.0
+
+# "Cbuf_AddText: buffer overflow" makes ConVars silently revert to defaults — a
+# failure that looks like your config was ignored, which is exactly what happened.
+sm:alliedmods/cbuf-overflow-fixer 2.9a
+
+# Random "CNavLadder::GetPosAtHeight" crash, reported as multiple times a day.
+sm:alliedmods/ladder-crash-patch 1.1
+
+# Tank entities in third-party maps spawn broken and wedge the game. Directly
+# relevant to the campaigns branch.
+sm:fbef0102/l4d2_maptankfix 1.5
+
+# Forced changelevel loses gascans in scavenge and misfires OnGameplayStart.
+sm:Target5150/l4d2_fix_changelevel 1.1
+sm:fbef0102/l4d2_transition_info_fix 1.2.0
+
+# Valve bugs, each individually observable.
+sm:alliedmods/defib-fix 2.0.1
+sm:alliedmods/charger-collision-patch 2.0
+sm:LuxLuma/witch_target_patch 1.4
+sm:alliedmods/survivor-set-flow-fix 2.1
+sm:alliedmods/inputkill-kick-prevention 1.0

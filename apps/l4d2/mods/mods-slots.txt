@@ -1,0 +1,46 @@
+# --- Respawn: L4D2 SLOT MACHINERY (coop past 4) --------------------------------
+# THE BIGGEST CLUSTER, AND THE MOST HONEST THING IN THESE FILES: raising the coop
+# cap is one plugin plus a dozen repairs for things that assume four survivors.
+#
+# S5 measured the machinery as INERT at four players — identical to base at
+# defaults — which is the argument for carrying it in the base and making player
+# count an .env knob rather than a second image. The cost is equally honest: these
+# are the plugins most likely to break on a Valve update, and in the base every
+# variant carries that risk.
+#
+# Versus is natively 8 players and needs NONE of this. Only coop, realism,
+# survival and scavenge are capped at 4.
+#
+# S5 note: must use the `oldlinux` L4DToolZ build; the plain one fails on glibc and
+# leaves a server with no slot support at all.
+#
+# All versions (pack).
+
+# The cap itself. Adds sv_maxplayers (0-32, 31 practical), sv_removehumanlimit,
+# sv_force_unreserved. NOTE: sv_maxplayers does NOT exist without this — measured
+# 2026-08-30, `sv_maxplayers` is "Unknown command" on the S1 base image.
+mm:lakwsh/l4dtoolz 2026.1.1
+
+# The extra survivor slots themselves, and the extension built for extra-slot
+# servers.
+sm:fbef0102/l4dmultislots 6.9
+ext:LuxLuma/Left4Fix 2026.1.1
+
+# --- the repair tail: each fixes something that breaks ONLY past four survivors ---
+
+# A survivor changes identity when a player connects/disconnects at 5+.
+sm:Shadowysn/survivor-identify-fix 1.7b
+# Upgrade-pack pickup bug on 8+ servers.
+sm:fbef0102/l4d_both_fixUpgradePack 1.0h
+# Extra survivors become NPCs in c6m1_riverbank and c6m3_port.
+sm:alliedmods/the-passing-character-fix 1.0
+# After the finale rescue leaves, extra survivors die / fall / miscount.
+sm:fbef0102/l4d2_rescue_vehicle_multi 1.0h
+# One rescue entity should rescue every eligible survivor.
+sm:alliedmods/5plus-rescue-closet 1.0.0b
+# Friendly-fire quotes never play for the 5th survivor onward.
+sm:alliedmods/5plus-ff-quote-fix 1.1.5d
+# An idle player whose bot dies becomes a full spectator instead of taking over.
+sm:fbef0102/l4dafkfix_deadbot 1.0h
+# Survivor AFK handling.
+sm:alliedmods/survivor-afk-fix 1.0.4

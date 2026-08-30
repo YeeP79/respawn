@@ -1,0 +1,24 @@
+# --- Respawn: L4D2 GAMEPLAY (flavour) ------------------------------------------
+# Things that change what a night on the server is like. All server-side, so all
+# base-eligible by the client-visibility rule — but shipped DEFAULT-OFF, because
+# unlike the tiers above these are opinions rather than repairs.
+#
+# This is the tier where "best rated" actually means something, and where the
+# evidence is weakest: AlliedMods has no ratings, so the ranking signals available
+# are GitHub stars, thread longevity, and inclusion in curated packs. Stated
+# plainly rather than dressed up as a score.
+
+# The most-cited "makes the game feel new" plugin. A merger of Last Boss, Last Boss
+# Extended and Super Tanks, giving Tanks distinct powers. Highly configurable,
+# which also makes it the one most likely to need tuning before it is fun rather
+# than infuriating. (read: repo is Psykotikism/Mutant_Tanks, v9.3 dated 2025-01-01,
+# by Alfred "Psyk0tik" Llagas / Crasher_3637.)
+sm:Psykotikism/Mutant_Tanks 9.3
+
+# Multi special-infected bots in any mode, playable SI in coop/survival, and
+# unlocked infected slots (10v10). The single biggest change to what coop feels
+# like that does not touch the survivor cap.
+sm:fbef0102/l4dinfectedbots latest
+
+# Survivor bots moved to their own BASE tier — see mods-bots.txt. They are not
+# flavour here: an empty-most-of-the-time server means bots ARE the session.

@@ -1,0 +1,41 @@
+# --- Respawn: L4D2 CONTROL -----------------------------------------------------
+# The MCP's surface. This tier is the reason the whole stack exists: without it the
+# AI Director is reachable only behind sv_cheats 1, which is GLOBAL — it grants
+# cheats to every connected player — and therefore unusable on a real server.
+#
+# S2 measured the mechanism: the plugin strips FCVAR_CHEAT for the duration of one
+# call and restores it, so sv_cheats stays 0 and players get nothing.
+
+# THE control plugin. 12 registered commands, 10 drivable over rcon.
+#
+# TWO SOURCES, and they are not the same code. DIFFED 2026-08-30 (S11) — keep ours.
+#
+# The fork (fbef0102 v3.9) is the better-maintained repo by every visible measure:
+# 303 stars, 945 commits, shipped by the curated pack. It also registers SEVEN
+# commands to AtomicStryker's twelve, and the five it drops are the ones that matter:
+#
+#   a4d_force_tank          gone
+#   a4d_force_witch         gone
+#   a4d_add_zombies         gone
+#   a4d_continuous_bosses   gone
+#   a4d_reset_to_defaults   gone   <- the one-call undo for everything above
+#
+# Losing the safety valve for the two commands S2 marked `danger: true` is not a
+# trade worth making for maintenance activity. Confirmed live on the full stack:
+# a4d_force_panic present, a4d_force_tank / _reset_to_defaults "Unknown command".
+#
+# Popularity and commit count are not a command surface. Diff, do not assume.
+sp:AtomicStryker/all4dead2 master        # what S1/S2 built and S11 confirmed to be richer
+# sm:fbef0102/all4dead2 3.9              # REJECTED — 7 commands vs 12, see S11
+
+# Spawns special infected without the director's limits. Directly widens the
+# control surface: our spawn commands currently obey the director's cap.
+sm:fbef0102/spawn_infected_nolimit 1.3h
+
+# Executes a cfg file based on current game settings at map load. This is how a
+# "difficulty + gametype" knob becomes a real thing rather than a pile of rcon
+# calls. Forked to fix difficulty changes being reset.
+sm:alliedmods/gamemode-config-loader 1.8+fork.1
+
+# Runs .cfg files from chat commands — the human-facing counterpart to the above.
+sm:SNWCreations/ChatExec 1.0.1

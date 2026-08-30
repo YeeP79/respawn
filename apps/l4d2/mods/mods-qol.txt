@@ -1,0 +1,27 @@
+# --- Respawn: L4D2 QUALITY OF LIFE ---------------------------------------------
+# Admin-facing or invisible conveniences. Every one is individually reversible by
+# cvar, and none is detectable at the door.
+#
+# All versions (pack).
+
+# Respawn a dead survivor without losing their statistics — the single most-wanted
+# admin action on a private server.
+sm:alliedmods/sm-respawn-improved 3.9
+
+# Removes lobby reservation when the server is full or empty. Worth understanding
+# rather than just enabling: S4 measured that lobby reservation is what blocks a
+# direct `connect`, and sv_allow_lobby_connect_only is a SERVER cvar. This plugin
+# automates what we set by hand. It is also the likely answer to S6.
+sm:fbef0102/l4d_unreservelobby 1.7h
+
+# Colour support for chat output; several plugins above expect it.
+sm:Bara/Multi-Colors 2.1.2
+
+# Toggles, all default-off.
+sm:wyxls/l4d2_infiniteammo 1.5.6
+sm:alliedmods/no-friendly-fire 10.0
+sm:fbef0102/drop_secondary 2.6
+
+# Reports what is actually loaded, with versions — the manual counterpart to the
+# verify_manifest tool proposed in docs/mcp-tooling-gaps.md.
+sm:alliedmods/sm-detailed-plugins-list 1.0

@@ -1,0 +1,27 @@
+# --- Respawn: L4D2 PLATFORM ----------------------------------------------------
+# The floor. Nothing else in any tier loads without these, and S1 proved this exact
+# set builds and loads together with zero errors (+0.3 GB).
+#
+# Our pins are NEWER than the curated pack's everywhere they overlap; the pack is a
+# known-good floor, not a target.
+#
+# <kind>:<locator> <version> [client-side]
+
+# Sits between engine and game; everything hooks through it. S1-verified.
+# Two files must be REMOVED after unpacking or the boot log carries what look like
+# real failures: metamod_x64.vdf (L4D2's srcds is 32-bit -> "wrong ELF class") and
+# sourcemod/plugins/nextmap.smx ("Nextmap is incompatible with this game").
+pkg:metamodsource/mmsource 2.0.0-git1410
+
+# The plugin platform proper. Brings the sm_ family and the admin system.
+pkg:sourcemod/sourcemod 1.12.0-git7251
+
+# The L4D2-specific native/forward layer. 248 forwards, 298 natives, 181 stocks;
+# detours dynamically, hooking only what other plugins ask for, so it is cheap to
+# carry in a base most variants barely use. Pinned by COMMIT because the project
+# publishes no releases or tags.
+pkg:SilvDev/Left4DHooks f90ae5e6
+
+# Edits map entities before load. The standard way to fix a broken third-party map
+# without decompiling it. S1-verified.
+pkg:bailopan/stripper 1.2.2-hg82

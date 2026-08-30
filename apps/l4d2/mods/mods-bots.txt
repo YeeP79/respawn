@@ -1,0 +1,53 @@
+# --- Respawn: L4D2 SURVIVOR BOTS -----------------------------------------------
+# BASE TIER. These servers sit scaled to zero most of their life, so the normal
+# session is one or two humans plus three bots. Bot quality is not a garnish here,
+# it is the majority of the experience.
+
+# --- Left 4 Bots 2 — VERIFIED ON A DEDICATED SERVER (S10, 2026-08-30) ----------
+# 6,962 Workshop ratings. VScript, shipped as a Workshop VPK — 70 .nut files under
+# scripts/, zero models/materials/maps/sounds, so nothing a client must render.
+#
+# S10 measured it end to end: it loads, initialises for the map, runs the map's
+# automation script, tracks every bot with a live order queue, and OBEYS ORDERS,
+# with the joining client holding nothing that matters.
+#
+# Chosen over the SourceMod alternative because it is the only one of the two with a
+# COMMAND surface — ~20 orders addressable to one bot, a named bot, or all of them,
+# on a priority queue, plus a user-editable vocalizer binding table. Every agent
+# ambition in docs/l4d2-agent-ambitions.md rests on that.
+ws:3022416274 latest    # Left 4 Bots 2
+ws:2634208272 latest    # Left 4 Lib — MANDATORY, L4B does nothing without it
+ws:3226661388 latest    # NavFixes — only needed for The Last Stand, cheap to carry
+
+# *** DEPLOY REQUIREMENT, AND IT FAILS SILENTLY ***
+#
+# Left4Lib gates every command behind a user level, and auto-promotes to Admin ONLY
+# when Director.IsSinglePlayerGame() is true — i.e. on a listen server. On a
+# dedicated server every player is level 0 and every order is dropped with NO
+# message, NO log line, and no other signal. Chat still works, bots are still
+# tracked, the debug HUD still renders. Only the orders vanish.
+#
+# So each server must be provisioned with ems/left4lib/cfg/admins.txt:
+#
+#     STEAM_1:1:14886575 //YeeP
+#
+# Read at init (needs a restart). `l4u add <player> a` cannot bootstrap this — it
+# requires being admin already.
+#
+# Shape this fits: the Valheim rcon config (apps/valheim/respawn-rcon-config.sh) —
+# a config file only the game container can write. Unlike that one it is NOT secret,
+# so it can be a plain GAME_ENV_ value rendered by a shim rather than an ECS secret.
+# A deploy preflight belongs here: a missing file yields a healthy-looking server
+# that nobody can drive.
+
+# --- REJECTED: Bot AI Improver -------------------------------------------------
+# Emana202/L4D2-Survivor-Bot-AI-Improver, a SourceMod plugin (32 stars). Carried for
+# part of this session as the interim while S10 was open, on the grounds that a
+# plugin is server-side by construction. S10 removed the need.
+#
+# It CONFLICTS with L4B (its README lists L4B settings to disable, and its optional
+# VScript extension is reported to crash on map load alongside it), so this is a
+# swap, not an addition. It is also AUTONOMOUS: ~40 `ib_*` cvars tune posture, but
+# nothing addresses an individual bot. You can make them braver; you cannot say
+# "go left".
+# sm:Emana202/L4D2-Survivor-Bot-AI-Improver main   -- DO NOT enable alongside L4B
