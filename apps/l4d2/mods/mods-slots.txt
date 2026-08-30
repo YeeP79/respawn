@@ -14,11 +14,34 @@
 # S5 note: must use the `oldlinux` L4DToolZ build; the plain one fails on glibc and
 # leaves a server with no slot support at all.
 #
+# S14 note: L4DToolZ registers through `addons/l4dtoolz.vdf` — the ENGINE's server-plugin
+# loader, the same layer Metamod itself sits on — so it never appears in `meta list`.
+# S11 read its absence there as a half-loaded stack and wrongly concluded nobody should
+# build a big-coop variant. `plugin_print` is the list that covers this layer.
+#
 # All versions (pack).
 
-# The cap itself. Adds sv_maxplayers (0-32, 31 practical), sv_removehumanlimit,
-# sv_force_unreserved. NOTE: sv_maxplayers does NOT exist without this — measured
-# 2026-08-30, `sv_maxplayers` is "Unknown command" on the S1 base image.
+# The cap itself. Adds sv_maxplayers, sv_visiblemaxplayers, sv_force_unreserved. NOTE:
+# sv_maxplayers does NOT exist without this — measured 2026-08-30, `sv_maxplayers` is
+# "Unknown command" on the S1 base image.
+#
+# Four cvars, and they are not interchangeable (S14, all measured live on v2.4.3):
+#   sv_setmax             engine max CLIENTS, the real ceiling. 18-32, DEFAULT 18.
+#   sv_maxplayers         max HUMAN players. -1..31; -1 disables and restores the
+#                         stock check. Above 31 crashes since The Last Stand, which
+#                         is why the newer build caps at 31 where S5 saw 32.
+#   sv_visiblemaxplayers  the count ADVERTISED to browsers, and nothing else.
+#   sv_force_unreserved   refuse lobby matchmaking; also zeroes
+#                         sv_allow_lobby_connect_only, which is its own joinability trap.
+#
+# Raising sv_maxplayers past sv_setmax gives a server that ADVERTISES the slots and
+# cannot seat them — the failure surfaces as players failing to connect, nowhere near
+# the cvar that caused it. Both take effect live over rcon; lakwsh's README only
+# documents the launch-option form of sv_setmax.
+#
+# `sv_removehumanlimit` is NOT in this set. It does not exist on 2.2.0 (S5) or on
+# 2.4.3 (S14) — the community guides listing it describe a build neither of these is,
+# and sv_maxplayers ("Max human players") does its job.
 mm:lakwsh/l4dtoolz 2026.1.1
 
 # The extra survivor slots themselves, and the extension built for extra-slot
