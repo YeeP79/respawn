@@ -29,15 +29,30 @@ RUN curl -sfL "${MM_TGZ}"       | tar xz \
  && curl -sfL "${STRIPPER_TGZ}" | tar xz
 
 # Left4DHooks: prebuilt .smx plus its gamedata and data files.
+#
+# scripting/include is extracted too, and it is NOT optional decoration: first-party
+# plugins compile against left4dhooks.inc, and without it the image can run
+# Left4DHooks but not build anything that uses it. Found the hard way — a plugin
+# needing L4D2_ExecVScriptCode could not be compiled in the very image that ships
+# the extension providing it.
 RUN curl -sfL "https://github.com/SilvDev/Left4DHooks/archive/${L4DH_SHA}.tar.gz" \
       | tar xz --strip-components=2 -C addons/sourcemod \
         "Left4DHooks-${L4DH_SHA}/sourcemod/plugins" \
         "Left4DHooks-${L4DH_SHA}/sourcemod/gamedata" \
-        "Left4DHooks-${L4DH_SHA}/sourcemod/data"
+        "Left4DHooks-${L4DH_SHA}/sourcemod/data" \
+        "Left4DHooks-${L4DH_SHA}/sourcemod/scripting/include"
 
 # All4Dead2 is the MCP's entire director surface, so a compile failure must fail
 # the build rather than produce an image that is quietly missing it.
+# The chat prefix players see on every director event. Upstream is "[A4D] ", which
+# names a plugin nobody on the server has heard of; the events are driven by the MCP,
+# so the agent is the honest author. One #define, patched before compiling because the
+# plugin ships as source anyway — there is no upstream artifact to diverge from.
+ARG A4D2_TAG="[Claude] "
+
 RUN curl -sfL "${A4D2_SP}" -o /tmp/all4dead2.sp \
+ && sed -i "s|#define PLUGIN_TAG.*|#define PLUGIN_TAG \t\t\t\t\t\"${A4D2_TAG}\"|" /tmp/all4dead2.sp \
+ && grep -qF "\"${A4D2_TAG}\"" /tmp/all4dead2.sp \
  && addons/sourcemod/scripting/spcomp64 \
       -i addons/sourcemod/scripting/include \
       /tmp/all4dead2.sp \
@@ -64,7 +79,8 @@ RUN test -f addons/metamod.vdf \
  && test -f addons/metamod/stripper.vdf \
  && test -f addons/sourcemod/plugins/left4dhooks.smx \
  && test -f addons/sourcemod/plugins/all4dead2.smx \
- && test -f addons/sourcemod/gamedata/left4dhooks.l4d2.txt
+ && test -f addons/sourcemod/gamedata/left4dhooks.l4d2.txt \
+ && test -f addons/sourcemod/scripting/include/left4dhooks.inc
 
 FROM left4devops/l4d2:latest
 COPY --from=build --chown=louis:louis /out/addons/ /addons/
