@@ -13,13 +13,19 @@
 # Crash reporting. Worth having first on a server nobody is watching, because
 # without it a crash is an unexplained process death.
 #
-# *** BROKEN ON THIS BASE IMAGE — S11, 2026-08-30 ***
+# *** REQUIRES THE C++ RUNTIME SWAP — S13, 2026-08-30 ***
+# On the stock base image this fails and SourceMod carries on, so the server looks
+# healthy while the one component whose job is explaining an unexplained death is
+# absent:
 #   [SM] Unable to load extension "accelerator.ext":
 #        bin/libstdc++.so.6: version `GLIBCXX_3.4.21' not found
-# It needs a build matching left4devops/l4d2's libstdc++, or it must be dropped
-# rather than shipped. A crash reporter that silently fails to load is worse than
-# none: it is a false assurance about the one thing nobody is watching.
-# sm:alliedmods/accelerator 2.6.0-git165
+#
+# It needs GLIBCXX_3.4.29 (GCC 11) and the game bundles GLIBCXX <= 3.4.16 (GCC 4.7),
+# so no older build of Accelerator closes the gap — bin/libstdc++.so.6 has to be
+# replaced, and libgcc_s.so.1 with it. The variant Dockerfile does that and pins the
+# pair; a variant that does NOT carry the swap must leave this line commented out,
+# because a crash reporter that silently fails to load is worse than none.
+sm:alliedmods/accelerator 2.6.0-git165
 
 # Loads assembly patches from config; several fixes below depend on it.
 sm:alliedmods/source-scramble-manager 1.2.0
