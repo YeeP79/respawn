@@ -27,6 +27,7 @@
     "valheim:mods:fetch": "bash apps/valheim/scripts/fetch-mods.sh",
     "valheim:mods:publish": "bash apps/valheim/scripts/publish-mods.sh",
     "kz:content:fetch": "bash apps/cs16/variants/kz/scripts/fetch-content.sh",
+    "l4d2:plugins:build": "./apps/l4d2/scripts/build-plugins.sh",
     "kz:mapcycles": "bash apps/cs16/variants/kz/scripts/generate-mapcycles.sh"
   },
   "private": true,

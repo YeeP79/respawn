@@ -93,3 +93,17 @@ apps/*/variants/*/worlds/
 # `pnpm valheim:mods:fetch <variant>`, so this is the content/ relationship, not the
 # worlds/ one.
 apps/*/variants/*/mods/
+
+# Spike campaign payloads — refetchable from the Workshop, never committed.
+# S4 pulls these with `steamcmd +login anonymous +workshop_download_item 550 <id>`;
+# the ids are recorded in the spike, so the manifest is the doc and the VPK is the payload.
+lab/s4-campaign/
+
+# S10 VScript addon payloads — refetchable from the Workshop ids recorded in the
+# spike (3022416274 Left 4 Bots 2, 2634208272 Left 4 Lib).
+lab/s10-vscript/
+
+# Compiled SourceMod plugins — the .sp is tracked, the .smx is built.
+# Image builds compile from source (see the variant Dockerfile), so nothing
+# shipped depends on an artifact somebody built by hand.
+apps/*/plugins/build/
