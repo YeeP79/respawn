@@ -111,3 +111,7 @@ apps/*/plugins/build/
 # S11 build payload — the curated pack's assembled tree (355 MB), reproducible with
 # `git clone --depth 1 https://github.com/SNWCreations/l4d2-modded-server`.
 lab/s11-full-stack/payload/
+
+# S12 probe build output — same rule as apps/*/plugins/build/, and for the same
+# reason: the .sp is the artifact, the .smx is rebuilt from it.
+lab/s12-vscript-orders/build/

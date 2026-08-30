@@ -9,24 +9,59 @@
  *     {
  *       if (!player || !player.IsValid() || IsPlayerABot(player) || ...) return;
  *
- * rcon executes as Console<0>, which is not a player entity, so the agent cannot
- * issue orders directly no matter what permissions it holds. That is structural,
- * not a configuration problem (measured — see docs/spikes/S10.md).
+ * rcon executes as Console<0>, which is not a player entity, so the agent cannot issue
+ * orders through the chat-command path no matter what permissions it holds. That is
+ * structural, not a configuration problem (measured — see docs/spikes/S10.md).
  *
- * The fix is the same trick All4Dead2 already uses and which this repo has verified
- * working live: impersonate a connected human with FakeClientCommand. Orders only
- * matter while somebody is playing, and while somebody is playing there is always a
- * player to impersonate — so the degenerate case needs no handling.
+ * v2 worked around it by impersonating a connected human with FakeClientCommand. That
+ * cost two things, and both were defects rather than trade-offs:
  *
- * It is also two-way. The agent cannot watch chat (server log echo proved
- * unreliable — it died mid-session during S10 and took four readings with it), so
- * this plugin owns an inbox the agent drains over rcon. Nothing outside this plugin
- * can break it.
+ *   - L4B checked THAT PLAYER'S level, so every server needed an
+ *     `ems/left4lib/cfg/admins.txt` provisioned with the right Steam IDs, and a server
+ *     missing it dropped every order SILENTLY.
+ *   - a position order inherited the impersonated player's LIVE crosshair, so a
+ *     "wait there" captured seconds ago landed wherever they happened to be looking
+ *     when the agent got around to sending it.
+ *
+ * v3 calls L4B's order API directly instead:
+ *
+ *     L4D2_GetVScriptOutput("... ::Left4Bots.BotOrderAdd(bot, type, from, destEnt,
+ *                                destPos, destLookAtPos, hold, canPause) ...")
+ *
+ * The permission check lives in `HandleCommand`, not in `BotOrderAdd`, so this path
+ * needs no admin file at all — and `destPos` takes a literal vector, so the destination
+ * is the point the plugin captured at message time. Measured end to end in S12: a bot
+ * obeyed an order carrying literal coordinates with NO human connected and no admins
+ * file present.
+ *
+ * THREE THINGS S12 MEASURED THAT THIS FILE DEPENDS ON
+ * --------------------------------------------------
+ *   1. `L4D2_GetVScriptOutput` returns the value through a convar, and an integer 0
+ *      comes back indistinguishable from "the call failed". BotOrderAdd returns 0 on
+ *      its MOST COMMON SUCCESS PATH (the order replaced CurrentOrder), so every value
+ *      crossing the boundary is `.tostring()`d. This is correctness, not style.
+ *   2. Indexing `::Left4Bots.Bots` with an absent userid THROWS inside the VM rather
+ *      than returning null, and a throw is not reportable through the native's bool.
+ *      Every call therefore guards with `in` first and returns a sentinel.
+ *   3. The order vocabulary is closed (L4B's own OrderPriorities table). Anything else
+ *      returns -1, so it is validated here and named in the error.
+ *
+ * The chat-command path is deliberately NOT kept as a fallback. It is the one that
+ * fails silently when admins.txt is missing, and a footgun that works most of the time
+ * is worse than one that is absent.
+ *
+ * It is also two-way. The agent cannot watch chat (server log echo proved unreliable —
+ * it died mid-session during S10 and took four readings with it), so this plugin owns
+ * an inbox the agent drains over rcon. Nothing outside this plugin can break it.
  *
  * COMMANDS (all ADMFLAG_ROOT; rcon satisfies that as Console<0> — see S2)
  *   sm_rd_inbox            drain pending player messages, one per line
- *   sm_rd_order <src> <cmd...>   issue an L4B order as a real player
- *   sm_rd_status           bots, humans, and whether an order can be issued
+ *   sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]
+ *   sm_rd_cancel <target> [type]   drop queued orders
+ *   sm_rd_orders <target>          read back each bot's queue
+ *   sm_rd_status           bots, humans, and whether the L4B order API is reachable
+ *   sm_rd_scene            tactical readout
+ *   sm_rd_give <ent> [who] grant an item (operator-gated)
  */
 
 #include <sourcemod>
@@ -36,7 +71,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "0.2.0"
+#define PLUGIN_VERSION "0.3.0"
 #define INBOX_MAX      64
 #define MSG_MAXLEN     192
 
@@ -44,7 +79,7 @@ public Plugin myinfo =
 {
     name        = "respawn_director",
     author      = "respawn",
-    description = "Agent bridge for Left 4 Bots 2: order injection + a chat inbox",
+    description = "Agent bridge for Left 4 Bots 2: VScript order injection + a chat inbox",
     version     = PLUGIN_VERSION,
     url         = "https://github.com/"
 };
@@ -78,7 +113,9 @@ public void OnPluginStart()
         _, true, 0.0, true, 1.0);
 
     RegAdminCmd("sm_rd_inbox",  Cmd_Inbox,  ADMFLAG_ROOT, "Drain pending player messages");
-    RegAdminCmd("sm_rd_order",  Cmd_Order,  ADMFLAG_ROOT, "Issue an L4B order: sm_rd_order <botsource> <command...>");
+    RegAdminCmd("sm_rd_order",  Cmd_Order,  ADMFLAG_ROOT, "Issue an L4B order: sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]");
+    RegAdminCmd("sm_rd_cancel", Cmd_Cancel, ADMFLAG_ROOT, "Drop queued L4B orders: sm_rd_cancel <target> [type]");
+    RegAdminCmd("sm_rd_orders", Cmd_Orders, ADMFLAG_ROOT, "Read back each bot's order queue");
     RegAdminCmd("sm_rd_status", Cmd_Status, ADMFLAG_ROOT, "Report bots, humans and order readiness");
     RegAdminCmd("sm_rd_scene",  Cmd_Scene,  ADMFLAG_ROOT, "Tactical readout: survivors, threats, the Director's own intensity");
     RegAdminCmd("sm_rd_give",   Cmd_Give,   ADMFLAG_ROOT, "Give a weapon/item: sm_rd_give <entity_name> [player]");
@@ -268,52 +305,386 @@ public Action Cmd_Inbox(int client, int args)
 
 /* ---------- order injection ------------------------------------------------ */
 
-/** First connected human. L4B needs a player entity; any real one satisfies it. */
+/**
+ * L4B's order vocabulary, read out of its own OrderPriorities table. Closed set:
+ * BotOrderAdd returns -1 for anything else, and -1 is also what an invalid bot
+ * returns — so validating here is the only way the caller learns WHICH of the two
+ * went wrong. The list is duplicated from the VPK rather than queried because
+ * querying it costs a VM round trip per order to re-learn something that only
+ * changes when L4B is upgraded, which is a pinned event.
+ */
+static const char ORDER_TYPES[][] =
+{
+    "carry", "follow", "lead", "scavenge", "goto", "wait",
+    "deploy", "tempheal", "heal", "use", "destroy", "witch"
+};
+
+static bool IsOrderType(const char[] t)
+{
+    for (int i = 0; i < sizeof(ORDER_TYPES); i++)
+        if (StrEqual(ORDER_TYPES[i], t, false))
+            return true;
+    return false;
+}
+
+static void OrderTypeList(char[] out, int maxlen)
+{
+    out[0] = '\0';
+    for (int i = 0; i < sizeof(ORDER_TYPES); i++)
+    {
+        if (i > 0) StrCat(out, maxlen, " ");
+        StrCat(out, maxlen, ORDER_TYPES[i]);
+    }
+}
+
+/**
+ * Run one expression in the VScript VM and hand back what it evaluated to.
+ *
+ * Two rules, both measured in S12 and both invisible from the native's signature:
+ *   - the caller must have already appended `.tostring()`, because an integer 0
+ *     crosses the boundary as an empty string and reads as failure;
+ *   - a false return can mean the code threw, so it is reported as such rather than
+ *     folded into "no".
+ */
+static bool VsEval(const char[] expr, char[] out, int maxlen)
+{
+    char code[1024];
+    Format(code, sizeof(code), "<RETURN>%s</RETURN>", expr);
+    return L4D2_GetVScriptOutput(code, out, maxlen);
+}
+
+/** Is Left4Bots loaded and running a mode? Everything below is worthless if not. */
+static bool L4BReady()
+{
+    char out[64];
+    if (!VsEval("((\"Left4Bots\" in getroottable()) ? ::Left4Bots.ModeStarted : false).tostring()", out, sizeof(out)))
+        return false;
+    return StrEqual(out, "true");
+}
+
+/**
+ * Resolve a target token to survivor-bot client indices.
+ *   all | bots | team          every L4B-handled bot
+ *   #<userid>                  exactly that one
+ *   <name>                     case-insensitive substring, first match
+ * Returns the count written into `out`.
+ */
+static int ResolveTargets(const char[] target, int[] out, int maxout)
+{
+    int n = 0;
+    bool all = StrEqual(target, "all", false) || StrEqual(target, "bots", false)
+            || StrEqual(target, "team", false);
+
+    int wantUserId = -1;
+    if (target[0] == '#')
+        wantUserId = StringToInt(target[1]);
+
+    for (int i = 1; i <= MaxClients && n < maxout; i++)
+    {
+        if (!IsClientInGame(i) || !IsFakeClient(i) || GetClientTeam(i) != 2 || !IsPlayerAlive(i))
+            continue;
+        if (all)
+        {
+            out[n++] = i;
+            continue;
+        }
+        if (wantUserId >= 0)
+        {
+            if (GetClientUserId(i) == wantUserId) { out[n++] = i; break; }
+            continue;
+        }
+        char nm[MAX_NAME_LENGTH];
+        GetClientName(i, nm, sizeof(nm));
+        if (StrContains(nm, target, false) != -1) { out[n++] = i; break; }
+    }
+    return n;
+}
+
+/** Parse "x,y,z" (or "x y z") into a vector. False when it is not three numbers. */
+static bool ParseVector(const char[] src, float out[3])
+{
+    char work[96];
+    strcopy(work, sizeof(work), src);
+    ReplaceString(work, sizeof(work), ",", " ");
+    char parts[4][24];
+    if (ExplodeString(work, " ", parts, sizeof(parts), sizeof(parts[])) < 3)
+        return false;
+    for (int i = 0; i < 3; i++)
+    {
+        TrimString(parts[i]);
+        if (parts[i][0] == '\0')
+            return false;
+        out[i] = StringToFloat(parts[i]);
+    }
+    return true;
+}
+
+/**
+ * sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]
+ *
+ * key=value rather than positional because the arguments a given order type uses are
+ * disjoint — `wait` wants a position, `use` wants an entity, `follow` wants neither —
+ * and a positional form would need placeholder nulls that are easy to miscount and
+ * impossible to read back in a log.
+ */
+public Action Cmd_Order(int client, int args)
+{
+    if (args < 2)
+    {
+        char types[160];
+        OrderTypeList(types, sizeof(types));
+        ReplyToCommand(client, "ERR|usage|sm_rd_order <all|#userid|name> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]");
+        ReplyToCommand(client, "ERR|types|%s", types);
+        return Plugin_Handled;
+    }
+
+    char target[64], type[32];
+    GetCmdArg(1, target, sizeof(target));
+    GetCmdArg(2, type, sizeof(type));
+
+    if (!IsOrderType(type))
+    {
+        char types[160];
+        OrderTypeList(types, sizeof(types));
+        /* Name the vocabulary. BotOrderAdd answers -1 for a bad type AND for a bad
+           bot, so an unnamed rejection sends the caller looking in the wrong place. */
+        ReplyToCommand(client, "ERR|bad_type|%s|known: %s", type, types);
+        return Plugin_Handled;
+    }
+
+    /* Defaults chosen so an order with no keys is still a legal L4B order. */
+    char destPos[64]  = "null";
+    char destLook[64] = "null";
+    char destEnt[48]  = "null";
+    float hold = 0.0;
+    bool canPause = true;
+
+    for (int a = 3; a <= args; a++)
+    {
+        char kv[96];
+        GetCmdArg(a, kv, sizeof(kv));
+        int eq = FindCharInString(kv, '=');
+        if (eq <= 0)
+        {
+            ReplyToCommand(client, "ERR|bad_arg|%s|expected key=value", kv);
+            return Plugin_Handled;
+        }
+        char key[16];
+        strcopy(key, sizeof(key), kv);
+        key[eq] = '\0';
+        char val[80];
+        strcopy(val, sizeof(val), kv[eq + 1]);
+
+        if (StrEqual(key, "at", false) || StrEqual(key, "look", false))
+        {
+            float v[3];
+            if (!ParseVector(val, v))
+            {
+                ReplyToCommand(client, "ERR|bad_vector|%s=%s|expected three numbers", key, val);
+                return Plugin_Handled;
+            }
+            /* Squirrel literal. Six decimals because a nav position rounded to whole
+               units can land inside geometry, and DestRadius is already the tolerance. */
+            char lit[64];
+            Format(lit, sizeof(lit), "Vector(%f,%f,%f)", v[0], v[1], v[2]);
+            if (StrEqual(key, "at", false)) strcopy(destPos,  sizeof(destPos),  lit);
+            else                            strcopy(destLook, sizeof(destLook), lit);
+        }
+        else if (StrEqual(key, "ent", false))
+        {
+            int e = StringToInt(val);
+            if (e <= 0 || !IsValidEntity(e))
+            {
+                ReplyToCommand(client, "ERR|bad_entity|%s", val);
+                return Plugin_Handled;
+            }
+            Format(destEnt, sizeof(destEnt), "EntIndexToHScript(%d)", e);
+        }
+        else if (StrEqual(key, "hold", false))  hold = StringToFloat(val);
+        else if (StrEqual(key, "pause", false)) canPause = (StringToInt(val) != 0);
+        else
+        {
+            ReplyToCommand(client, "ERR|unknown_key|%s|known: at look ent hold pause", key);
+            return Plugin_Handled;
+        }
+    }
+
+    if (!L4BReady())
+    {
+        /* Distinguish the two reasons the API is unreachable. "Not loaded" is a build
+           problem; "mode not started" is a server that has not begun a round, which
+           resolves by itself and must not be reported as a fault. */
+        ReplyToCommand(client, "ERR|l4b_unready|Left4Bots is absent or no mode has started; no order can be placed");
+        return Plugin_Handled;
+    }
+
+    int bots[MAXPLAYERS + 1];
+    int n = ResolveTargets(target, bots, sizeof(bots));
+    if (n == 0)
+    {
+        ReplyToCommand(client, "ERR|no_target|%s|no living survivor bot matches", target);
+        return Plugin_Handled;
+    }
+
+    int placed = 0;
+    for (int i = 0; i < n; i++)
+    {
+        int uid = GetClientUserId(bots[i]);
+        char nm[MAX_NAME_LENGTH];
+        GetClientName(bots[i], nm, sizeof(nm));
+
+        /* The `in` guard is load-bearing: indexing Bots with an absent userid THROWS
+           inside the VM, and a throw surfaces only as a false return with no message.
+           -2 means "connected survivor bot that L4B is not handling", which is a real
+           and different state from -1. */
+        char expr[512], out[64];
+        Format(expr, sizeof(expr),
+            "((%d in ::Left4Bots.Bots) ? ::Left4Bots.BotOrderAdd(::Left4Bots.Bots[%d], \"%s\", null, %s, %s, %s, %f, %s) : -2).tostring()",
+            uid, uid, type, destEnt, destPos, destLook, hold, canPause ? "true" : "false");
+
+        if (!VsEval(expr, out, sizeof(out)))
+        {
+            ReplyToCommand(client, "ERR|vm_error|bot=%s|userid=%d|the VScript call threw or returned nothing", nm, uid);
+            continue;
+        }
+        int rc = StringToInt(out);
+        if (rc == -2)
+            ReplyToCommand(client, "ERR|not_handled|bot=%s|userid=%d|L4B is not managing this bot", nm, uid);
+        else if (rc < 0)
+            ReplyToCommand(client, "ERR|refused|bot=%s|userid=%d|type=%s|BotOrderAdd returned %d", nm, uid, type, rc);
+        else
+        {
+            /* queue=0 means it replaced CurrentOrder — the bot acts on it now. */
+            ReplyToCommand(client, "OK|order|bot=%s|userid=%d|type=%s|queue=%d", nm, uid, type, rc);
+            placed++;
+        }
+    }
+
+    ReplyToCommand(client, "ORDER|placed=%d|of=%d", placed, n);
+    return Plugin_Handled;
+}
+
+/**
+ * sm_rd_cancel <target> [type]
+ *
+ * BotCancelOrders returns null, so there is nothing useful to read back from the call
+ * itself — the order COUNT is reported instead, which is the fact the caller wanted.
+ */
+public Action Cmd_Cancel(int client, int args)
+{
+    if (args < 1)
+    {
+        ReplyToCommand(client, "ERR|usage|sm_rd_cancel <all|#userid|name> [type]");
+        return Plugin_Handled;
+    }
+
+    char target[64], type[32];
+    GetCmdArg(1, target, sizeof(target));
+    if (args >= 2)
+    {
+        GetCmdArg(2, type, sizeof(type));
+        if (!IsOrderType(type))
+        {
+            char types[160];
+            OrderTypeList(types, sizeof(types));
+            ReplyToCommand(client, "ERR|bad_type|%s|known: %s", type, types);
+            return Plugin_Handled;
+        }
+    }
+    else type[0] = '\0';
+
+    if (!L4BReady())
+    {
+        ReplyToCommand(client, "ERR|l4b_unready|Left4Bots is absent or no mode has started");
+        return Plugin_Handled;
+    }
+
+    int bots[MAXPLAYERS + 1];
+    int n = ResolveTargets(target, bots, sizeof(bots));
+    if (n == 0)
+    {
+        ReplyToCommand(client, "ERR|no_target|%s", target);
+        return Plugin_Handled;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        int uid = GetClientUserId(bots[i]);
+        char nm[MAX_NAME_LENGTH];
+        GetClientName(bots[i], nm, sizeof(nm));
+
+        char arg[40];
+        if (type[0] != '\0') Format(arg, sizeof(arg), "\"%s\"", type);
+        else                 strcopy(arg, sizeof(arg), "");
+
+        char expr[512], out[64];
+        Format(expr, sizeof(expr),
+            "((%d in ::Left4Bots.Bots) ? (::Left4Bots.Bots[%d].GetScriptScope().BotCancelOrders(%s), ::Left4Bots.BotOrdersCount(::Left4Bots.Bots[%d])) : -2).tostring()",
+            uid, uid, arg, uid);
+
+        if (!VsEval(expr, out, sizeof(out)))
+            ReplyToCommand(client, "ERR|vm_error|bot=%s|userid=%d", nm, uid);
+        else if (StringToInt(out) == -2)
+            ReplyToCommand(client, "ERR|not_handled|bot=%s|userid=%d", nm, uid);
+        else
+            ReplyToCommand(client, "OK|cancelled|bot=%s|userid=%d|remaining=%s", nm, uid, out);
+    }
+    return Plugin_Handled;
+}
+
+/**
+ * sm_rd_orders <target> — read each bot's queue back.
+ *
+ * This exists because an order that was accepted and an order that is being ACTED ON
+ * are different facts, and only the second one matters. BotOrderAdd's return says the
+ * order was queued; this says what the bot is doing about it.
+ */
+public Action Cmd_Orders(int client, int args)
+{
+    char target[64];
+    if (args >= 1) GetCmdArg(1, target, sizeof(target));
+    else           strcopy(target, sizeof(target), "all");
+
+    if (!L4BReady())
+    {
+        ReplyToCommand(client, "ERR|l4b_unready|Left4Bots is absent or no mode has started");
+        return Plugin_Handled;
+    }
+
+    int bots[MAXPLAYERS + 1];
+    int n = ResolveTargets(target, bots, sizeof(bots));
+    if (n == 0)
+    {
+        ReplyToCommand(client, "ERR|no_target|%s", target);
+        return Plugin_Handled;
+    }
+
+    for (int i = 0; i < n; i++)
+    {
+        int uid = GetClientUserId(bots[i]);
+        char nm[MAX_NAME_LENGTH];
+        GetClientName(bots[i], nm, sizeof(nm));
+
+        char expr[512], out[512];
+        Format(expr, sizeof(expr),
+            "((%d in ::Left4Bots.Bots) ? (::Left4Bots.BotOrdersCount(::Left4Bots.Bots[%d]) + \"|\" + ::Left4Bots.BotOrderToString(::Left4Bots.Bots[%d].GetScriptScope().CurrentOrder)) : \"-2|\").tostring()",
+            uid, uid, uid);
+
+        if (!VsEval(expr, out, sizeof(out)))
+            ReplyToCommand(client, "ERR|vm_error|bot=%s|userid=%d", nm, uid);
+        else
+            ReplyToCommand(client, "ORDERS|bot=%s|userid=%d|%s", nm, uid, out);
+    }
+    return Plugin_Handled;
+}
+
+/** First connected human. `give` and `scene` are both anchored on a person. */
 static int FindHuman()
 {
     for (int i = 1; i <= MaxClients; i++)
         if (IsClientInGame(i) && !IsFakeClient(i))
             return i;
     return 0;
-}
-
-public Action Cmd_Order(int client, int args)
-{
-    if (args < 2)
-    {
-        ReplyToCommand(client, "ERR|usage|sm_rd_order <bots|bot|botname> <command> [param]");
-        return Plugin_Handled;
-    }
-
-    int human = FindHuman();
-    if (human == 0)
-    {
-        /* Not a failure worth retrying: with nobody connected there are no bots to
-           command either. Say so plainly rather than returning a generic error. */
-        ReplyToCommand(client, "ERR|no_human|L4B orders require a player entity; nobody is connected");
-        return Plugin_Handled;
-    }
-
-    char src[64], rest[160];
-    GetCmdArg(1, src, sizeof(src));
-    GetCmdArgString(rest, sizeof(rest));
-
-    /* Re-join everything after the botsource, comma-separated, because
-       scripted_user_func takes  l4b,<botsource>,<command>[,<param>]  */
-    int skip = strlen(src);
-    char tail[160];
-    strcopy(tail, sizeof(tail), rest[skip]);
-    TrimString(tail);
-    ReplaceString(tail, sizeof(tail), " ", ",");
-
-    char full[256];
-    Format(full, sizeof(full), "scripted_user_func l4b,%s,%s", src, tail);
-    FakeClientCommand(human, "%s", full);
-
-    char hname[MAX_NAME_LENGTH];
-    GetClientName(human, hname, sizeof(hname));
-    ReplyToCommand(client, "OK|sent|as=%s|cmd=%s", hname, full);
-    return Plugin_Handled;
 }
 
 /* ---------- give: what All4Dead2 cannot do over rcon ------------------------ */
@@ -555,7 +926,11 @@ public Action Cmd_Status(int client, int args)
         }
         else humans++;
     }
-    ReplyToCommand(client, "STATUS|humans=%d|bots=%d|botnames=%s|orders_ready=%d|inbox=%d",
-        humans, bots, names, (humans > 0) ? 1 : 0, g_Inbox.Length);
+    /* orders_ready no longer tracks whether a human is connected — v3 needs none. It
+       tracks the thing that actually gates an order now, which is whether Left4Bots is
+       loaded and running a mode. Reporting the old condition would have said "ready"
+       on a server where every order silently fails. */
+    ReplyToCommand(client, "STATUS|humans=%d|bots=%d|botnames=%s|orders_ready=%d|inbox=%d|api=vscript",
+        humans, bots, names, L4BReady() ? 1 : 0, g_Inbox.Length);
     return Plugin_Handled;
 }
