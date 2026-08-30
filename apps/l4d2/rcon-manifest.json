@@ -1,7 +1,7 @@
 {
   "displayName": "Left 4 Dead 2",
   "engine": "source",
-  "notes": "Source engine, rcon over TCP via the sidecar. Standard Source console + L4D2 director/difficulty cvars; not yet verified against a live server.",
+  "notes": "Source engine, rcon over TCP via the sidecar. Verified against a live srcds 2.2.4.3 (build 9309) on 2026-08-30: say, map, kickid, sv_password, status, z_difficulty and sv_alltalk all confirmed; kick-by-name is the one entry still unverified (needs a connected player). Two cvars were removed as non-functional rather than left to fail at runtime - mp_gamemode does not exist on this build (`find gamemode` returns nothing; the mode is set by change_mode_and_map, confirmed by the slot count moving 4->8 on versus), and director_no_specials is FCVAR_CHEAT so it is refused whenever sv_cheats is 0, which is always on a real server. See docs/spikes/S2.md.",
   "maps": "live",
   "commands": [
     { "name": "change_map", "description": "Load a campaign map (e.g. c1m1_hotel, c2m1_highway).", "rcon": "map {map}", "args": { "map": { "type": "string" } } },
@@ -22,8 +22,6 @@
   ],
   "cvars": [
     { "name": "z_difficulty", "description": "Difficulty: Easy, Normal, Hard, Impossible.", "default": "Normal", "values": ["Easy", "Normal", "Hard", "Impossible"] },
-    { "name": "mp_gamemode", "description": "Game mode.", "default": "coop", "values": ["coop", "versus", "survival", "realism", "scavenge"] },
-    { "name": "sv_alltalk", "description": "Everyone hears each other's voice.", "default": "0", "values": ["0", "1"] },
-    { "name": "director_no_specials", "description": "Disable special infected spawns.", "default": "0", "values": ["0", "1"] }
+    { "name": "sv_alltalk", "description": "Everyone hears each other's voice.", "default": "0", "values": ["0", "1"] }
   ]
 }
