@@ -1,141 +1,130 @@
-# Respawn — where we are (2026-08-28)
+# Respawn — where we are (2026-08-29)
 
-Read `CLAUDE.md` first for the gotchas. This file is just **current state and next
-step**.
+Read `CLAUDE.md` first for the gotchas. This file is **current state and next step**.
 
 ---
 
 ## State right now
 
-**Branch `feat/goldsrc-mod-variants`, 21 commits ahead of `main`, nothing pushed.**
-Working tree clean apart from this file and the untracked `valheim-files.zip` you
-parked in the repo root — leave both out of commits.
+**`main` is at `0531be7` and pushed.** `feat/goldsrc-mod-variants` was fast-forwarded
+into it — 25 commits, including all the tfc/cs16-kz/mysql/goldsrc work that had been
+sitting unmerged, plus the Valheim work below. Working tree clean.
 
-**Every server is scaled to zero. Nothing is billing.**
+**Every server is scaled to zero. Nothing is billing** beyond S3/EFS storage.
 
-```
-respawn-dev-tfc  ut99  cs16-dm  cs16  cs16-kz  doom2   → all desired=0
-```
-
-SSO expires often: `aws sso login --profile respawn`.
+`valheim` (vanilla) has **never been deployed** — its stack does not exist yet.
 
 ---
 
-## Two things finished this session
+## What Valheim now is
 
-### 1. cs16-kz is deployed and actually works
+Two variants, deliberately separate services:
 
-It was built but never deployed. Getting it live surfaced four real defects, all
-fixed and verified on the running server:
-
-| Defect | Was |
-|---|---|
-| MySQL health check `retries: 12` | ECS caps at 10 → the whole deploy rolled back |
-| `MARIADB_ROOT_HOST: localhost` | No TCP-capable root account existed; every client got "Access denied" |
-| Game server never waited for the database | The KZ timer's SQL plugins died at boot, silently — server looked healthy |
-| `sv_airaccelerate` stuck at 10 | `uq_jumpstats` owns the cvar; setting the engine one is overwritten within a second |
-
-Verified live: 67 plugins loaded with none failed, 19 tables in `kreedz`, and the
-S3 backup round-trip proven end to end — one task dumped, the next restored it.
-
-**Also fixed a security hole across all five GoldSrc services.** HLDS was writing
-the rcon password into CloudWatch on every command. `apps/_shared/hlds-log-redact.sh`
-now filters it; proven with a real rcon call against a real build.
-
-### 2. L4D2 research, then six spikes
-
-Full research is in the dossier artifact (`/artifacts` in the terminal, or the
-gallery). The short version of the plan:
-
-> **One shared base of server-side mods. A change only becomes its own server when
-> a player has to do something differently to join.**
-
-Then `docs/spikes/` — one file per open question, blueline's format. **Six of eight
-are answered.**
-
----
-
-## The spike board
-
-| | Question | Answer |
+| | `valheim` (vanilla) | `valheim-modded` |
 |---|---|---|
-| S1 | Does the mod stack build and load? | ✅ Yes — MetaMod + SourceMod + Left4DHooks 1.168 + All4Dead2 + Stripper, zero errors, +221 MB |
-| S2 | Can the MCP drive it? | ✅ Yes — no `admins.cfg` needed, rcon runs as `Console<0>`. **12 commands, not 13** |
-| S3 | Does srcds leak the rcon password? | ⚠️ Not to logs. **But the entrypoint puts it in argv** — fix is one line in the shim |
-| S5 | Is the slot plugin safe when off? | ✅ Yes — identical to base at 4 players, and resizes a live server with no restart |
-| S7 | Image size / storage | ✅ **10.4 GB, not 15.6.** Storage is *not* a blocker — I was wrong about this |
-| S8 | Do ECR variants cost real money? | ✅ Duplication is real but the whole registry is ~19¢/month. Cost is not a factor |
-| **S4** | **Do players need the campaign installed?** | **⬜ NEEDS YOU** |
-| **S6** | **What must the 5th player do?** | **⬜ NEEDS YOU** |
+| Mods | none | BepInEx, plugins from S3 |
+| Mid-game admin | **impossible** — Valheim has no remote console | rcon via ValheimRcon |
+| Image | upstream `IMAGE_URI` | local build (rcon config shim) |
+| Crossplay | on | **off** — required for mods; PC/Steam only |
+
+Separate stacks mean separate EFS volumes and disjoint S3 prefixes, so neither can reach
+the other's world.
+
+**World saves round-trip.** The `world-sync` sidecar seeds from a one-shot `inbox/` and
+mirrors the volume back to `live/` on an interval and on SIGTERM. Drive it with
+`list_worlds`, `world_status`, `publish_world`, `pull_world`, `clear_world`,
+`switch_world` — or `pnpm valheim:world:*`.
+
+**Saves carry provenance.** `<world>.respawn.json` records flavor, which plugins ran, and
+each run. A save that has run a **world-altering** mod is refused by the vanilla server
+for ever. A mod declared `world-safe` in `mods.txt` (an rcon listener writes no prefabs)
+leaves the save `vanilla` and returnable.
+
+**There is no default world**, on purpose. Valheim generates an empty world under an
+unknown name rather than failing, so every deploy must name one.
+
+### The worlds
+
+| World | Version | State |
+|---|---|---|
+| `IJT World` | v37 | **canonical.** 211.5 in-game days. Upgraded from v35 on 2026-08-29 |
+| `IJT World 2024` | v33 | 19.2 days. May-2024 snapshot of the same seed — **the designated experiment world** |
+
+Two byte-identical v35 backups of `IJT World` exist under `worlds/.previous/`
+(`77ed7c64…`, matching the original archive extraction). The source archive is deleted;
+`apps/*/worlds/` is gitignored and is the **only** copy — it needs a backup that is not
+this repo.
 
 ---
 
-## ▶ NEXT: S4 and S6 — both need you in the game
+## ▶ NEXT: real (world-altering) game mods
 
-Everything answerable without a game client is done. These two are the last, and
-they are the only reason the plan still has an open shape.
+Everything so far used exactly one mod, and a world-safe one. Bringing in EpicLoot,
+PlantEverything, Warfare etc. crosses a line the current setup guards but has never
+exercised.
 
-### S4 — the important one
+**The one-way door.** A prefab-adding mod writes ZDOs into the save. Remove the mod and
+Valheim deletes those objects on load, rewriting a continuous object stream — usually
+unrepairable. The clock guard cannot catch this: a damaged save has *more* play on it,
+not less. So:
 
-**Question:** can someone join a server running a custom campaign they have *not*
-subscribed to?
+- Experiment on **`IJT World 2024`**, never `IJT World`.
+- Snapshot to a new name in `worlds/` before enabling anything prefab-adding. Nothing
+  automatic can overwrite a differently-named world.
 
-**Why it matters:** it decides whether custom campaigns are a setting on the main
-server, or a whole separate server. Sources genuinely contradict each other — one
-walkthrough never mentions the client at all, others describe a conflict that only
-makes sense if the client has its own copy. Not resolvable by reading more.
+**Open questions nobody has answered:**
 
-**Roughly:** I add one custom campaign to a local server, you connect from a client
-with nothing subscribed, and we see whether you spawn in or get an error.
+1. **Which mods.** Not chosen. `mods.txt` holds only `Tristan/ValheimRcon 1.5.1
+   world-safe`. Pin exact versions — "latest" on server and client are not the same thing.
+2. **Client parity.** Every player needs the identical set at identical versions or they
+   cannot connect. Export an r2modman modpack code and hand it out. Untested with more
+   than zero players.
+3. **Mod config files are NOT solved in general.** ValheimRcon's password needed a shim
+   (`respawn-rcon-config.sh` on `PRE_SERVER_RUN_HOOK`) because BepInEx reads config from
+   `/opt/valheim/bepinex/BepInEx/config/`, which no sidecar mounts — a file written to
+   `/config/bepinex/config/` is silently never read. **Any config-driven mod hits this.**
+   The shim is currently hard-coded to one plugin's file; a second configured mod needs it
+   generalised.
+4. **`world-safe` is an operator assertion**, not derivable from a `.dll`. Default is
+   unsafe. Only mark a mod world-safe if you are confident it writes no prefabs — it is
+   recorded in every world's stamp so the claim is auditable, but nothing checks it.
+5. **30 manifest commands are `unverified`.** Reconciled against the server's own `list`
+   for name and signature, but only `list`, `server_stats`, `time` and `save` have been
+   run. Clear flags as they are exercised.
 
-### S6 — the smaller one
-
-**Question:** past 4 players, what does the 5th person actually have to do?
-
-S5 already proved the server side works from one cvar, so this is purely about the
-client experience. Needs two players. It may also dissolve itself — Left4DHooks
-ships `sm_l4dd_unreserve`, and if lobby reservation is the real obstacle, the extra
-step may vanish and big-coop stops needing its own server.
-
----
-
-## Ready when you are
-
-The spike images are built locally, so S4 can start immediately:
-
-```
-l4d2-base-spike:s1     the base stack
-l4d2-slots-spike:s5    base + L4DToolz
-```
-
-Reproducible recipes live in `lab/s1-modded-image/` and `lab/s5-slot-machinery/`.
-`lab/srcds-rcon.py` is the Source rcon client the spikes use.
+**To get a modded session going:** add to `mods.txt` → `pnpm valheim:mods:fetch modded` →
+`pnpm valheim:mods:publish modded respawn` → `publish_world` → `switch_world` → play →
+`pull_world`.
 
 ---
 
-## Open decisions for you (none blocking)
+## L4D2 spikes — unchanged
 
-1. **Enable ECR `BLOB_MOUNTING`?** Account-wide switch, stops layer duplication.
-   Saves ~13¢/month and speeds up image pushes. I didn't touch it — your call.
-2. **Push this branch?** 21 commits sitting local.
-3. **`HANDOFF.md` is stale** — it's from 2026-07-10 and still describes branch
-   `feat/ut99-uweb-variants`. Worth updating or retiring; I left it alone rather
-   than guess which.
-4. **Build `l4d2-modded` now, or wait for S4/S6?** We know enough to start the base
-   service; S4 only changes whether campaigns are a separate server later.
+`docs/spikes/` — six of eight pass. **S4 and S6 remain, both need a human with L4D2
+open.** S4 decides whether custom campaigns are a setting or their own server; S6 defines
+the fifth-player ritual. Neither moved this session.
+
+---
+
+## Fleet health worth knowing
+
+`list_services` reports which tool families apply per service. It surfaced six services
+shipping an `rcon-manifest.json` with `ENABLE_RCON_CONTROL` **off** — declared commands
+that cannot be reached: `cs2`, `css`, `gmod`, `l4d2`, `quake3`, `tf2`. Left alone
+deliberately; you said those were never really set up.
 
 ---
 
 ## Facts worth not re-deriving
 
-- **The `oldlinux` L4DToolz build is mandatory.** The plain `linux` one fails on
-  glibc and leaves a server that boots perfectly with no slot support.
-- **Two files must be deleted from any L4D2 image**: `metamod_x64.vdf` (wrong
-  architecture, logs a scary error) and `nextmap.smx` (refuses this game).
-- **Don't size infrastructure from `docker images`** — it reported 50% high here.
-- **All4Dead2's commands split in two.** Seven only move a cvar and work always;
-  five (`force_panic` + the four spawns) need at least one client present, bots
-  count. A scale-to-zero server is empty most of the time, so that matters.
-- **The l4d2 base image runs `steamcmd` on every boot** — a network-dependent game
-  update before the server exists. Untested on Fargate, not solved.
-- **Versus is natively 8 players.** Only coop is capped at 4.
+- **AWS**: account `847378615943`, `us-east-1`, profile `respawn`. Log in with
+  `aws sso login --profile respawn` (add `--use-device-code` if the browser is signed into
+  the work portal).
+- **Secrets exist** for `valheim` (`SERVER_PASS`) and `valheim-modded` (`SERVER_PASS`,
+  `RCON_PASSWORD`). Read one back with `reveal_secret` — the join password is not in any
+  transcript.
+- **State bucket** `respawn-state-847378615943` is private and versioned; the FastDL
+  bucket is public-read by necessity. Never put a world in the latter.
+- **Valheim world data version is 37** as of 2026-08-29. Upgrades are one-way.
+- **The MCP is a separate process from the built bundle.** After changing
+  `apps/respawn-mcp`, rebuild *and* `/mcp` to reconnect, or you are driving stale code.
