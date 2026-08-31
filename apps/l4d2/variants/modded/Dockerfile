@@ -200,11 +200,18 @@ RUN cd /home/louis/l4d2/left4dead2/addons/sourcemod/scripting \
 # failure, and every one like it, is invisible on a healthy-looking server.
 COPY apps/_shared/source-logship.sh /logship.sh
 
-RUN chown -R louis:louis /addons /cfg /home/louis/l4d2/bin && chmod +x /logship.sh
+# Writes Left4Lib's admin list from L4B_ADMINS before the server starts. Not for the
+# agent — v3 does not go through the gated path — but for the human's direct binds, which
+# are otherwise silently inert. See the shim's own header.
+COPY apps/l4d2/variants/modded/respawn-init.sh /respawn-init.sh
+
+RUN chown -R louis:louis /addons /cfg /home/louis/l4d2/bin \
+ && chmod +x /logship.sh /respawn-init.sh
 USER louis
 
-# The upstream entrypoint takes its configuration from env vars; the shipper wraps it
-# rather than replacing it. It must NOT be `exec srcds | sed`: that makes the shell PID 1
-# and hands the container sed's exit status, and server_health reads that status to tell
-# a normal stop from an OOM kill.
-ENTRYPOINT ["/bin/sh", "/logship.sh", "/home/louis/l4d2/left4dead2", "./entrypoint.sh"]
+# init writes the config file, the shipper wraps the game, the upstream entrypoint takes
+# its configuration from env vars. The shipper must NOT be `exec srcds | sed`: that makes
+# the shell PID 1 and hands the container sed's exit status, and server_health reads that
+# status to tell a normal stop from an OOM kill.
+ENTRYPOINT ["/bin/sh", "/respawn-init.sh", \
+            "/bin/sh", "/logship.sh", "/home/louis/l4d2/left4dead2", "./entrypoint.sh"]
