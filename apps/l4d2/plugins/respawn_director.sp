@@ -56,7 +56,7 @@
  *
  * COMMANDS (all ADMFLAG_ROOT; rcon satisfies that as Console<0> — see S2)
  *   sm_rd_inbox            drain pending player messages, one per line
- *   sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]
+ *   sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1] [queue=1]
  *   sm_rd_cancel <target> [type]   drop queued orders
  *   sm_rd_orders <target>          read back each bot's queue
  *   sm_rd_status           bots, humans, and whether the L4B order API is reachable
@@ -433,7 +433,7 @@ public Action Cmd_Order(int client, int args)
     {
         char types[160];
         OrderTypeList(types, sizeof(types));
-        ReplyToCommand(client, "ERR|usage|sm_rd_order <all|#userid|name> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]");
+        ReplyToCommand(client, "ERR|usage|sm_rd_order <all|#userid|name> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1] [queue=1]");
         ReplyToCommand(client, "ERR|types|%s", types);
         return Plugin_Handled;
     }
@@ -458,6 +458,23 @@ public Action Cmd_Order(int client, int args)
     char destEnt[48]  = "null";
     float hold = 0.0;
     bool canPause = true;
+
+    /* SUPERSEDE BY DEFAULT, and this is the important one.
+       L4B orders its queue by a fixed priority table (follow/lead/carry/scavenge = 0,
+       goto/wait = 1, use/heal/deploy/destroy = 2, witch = 3) and BotOrderAdd will not
+       replace a CurrentOrder whose priority is >= the new one — it inserts the new order
+       BEHIND it and returns a queue position.
+
+       Measured live 2026-08-31: bots running `goto` (1) were sent `follow` (0) for
+       "regroup on me". The call answered OK and the bots kept walking away. A success
+       reply for an order that does nothing is the exact failure shape this project keeps
+       finding, and it would require every caller to know L4B's priority table to avoid.
+
+       An agent-issued order almost always expresses a NEW intent that REPLACES the old
+       one — the player said "actually, come here" — so cancelling first is the honest
+       default. `queue=1` opts into L4B's own priority behaviour for the rare case that
+       genuinely wants to append. */
+    bool supersede = true;
 
     for (int a = 3; a <= args; a++)
     {
@@ -502,9 +519,10 @@ public Action Cmd_Order(int client, int args)
         }
         else if (StrEqual(key, "hold", false))  hold = StringToFloat(val);
         else if (StrEqual(key, "pause", false)) canPause = (StringToInt(val) != 0);
+        else if (StrEqual(key, "queue", false)) supersede = (StringToInt(val) == 0);
         else
         {
-            ReplyToCommand(client, "ERR|unknown_key|%s|known: at look ent hold pause", key);
+            ReplyToCommand(client, "ERR|unknown_key|%s|known: at look ent hold pause queue", key);
             return Plugin_Handled;
         }
     }
@@ -526,7 +544,7 @@ public Action Cmd_Order(int client, int args)
         return Plugin_Handled;
     }
 
-    int placed = 0;
+    int placed = 0, queued = 0;
     for (int i = 0; i < n; i++)
     {
         int uid = GetClientUserId(bots[i]);
@@ -537,10 +555,20 @@ public Action Cmd_Order(int client, int args)
            inside the VM, and a throw surfaces only as a false return with no message.
            -2 means "connected survivor bot that L4B is not handling", which is a real
            and different state from -1. */
-        char expr[512], out[64];
+        /* Cancel and add in ONE expression rather than two calls: a cancel that lands and
+           an add that does not would leave the bot with no order at all, which is worse
+           than either outcome on its own. Squirrel's comma operator keeps them atomic
+           from the VM's point of view. */
+        char clear[96];
+        if (supersede)
+            Format(clear, sizeof(clear), "::Left4Bots.Bots[%d].GetScriptScope().BotCancelOrders(), ", uid);
+        else
+            clear[0] = '\0';
+
+        char expr[640], out[64];
         Format(expr, sizeof(expr),
-            "((%d in ::Left4Bots.Bots) ? ::Left4Bots.BotOrderAdd(::Left4Bots.Bots[%d], \"%s\", null, %s, %s, %s, %f, %s) : -2).tostring()",
-            uid, uid, type, destEnt, destPos, destLook, hold, canPause ? "true" : "false");
+            "((%d in ::Left4Bots.Bots) ? (%s::Left4Bots.BotOrderAdd(::Left4Bots.Bots[%d], \"%s\", null, %s, %s, %s, %f, %s)) : -2).tostring()",
+            uid, clear, uid, type, destEnt, destPos, destLook, hold, canPause ? "true" : "false");
 
         if (!VsEval(expr, out, sizeof(out)))
         {
@@ -552,15 +580,24 @@ public Action Cmd_Order(int client, int args)
             ReplyToCommand(client, "ERR|not_handled|bot=%s|userid=%d|L4B is not managing this bot", nm, uid);
         else if (rc < 0)
             ReplyToCommand(client, "ERR|refused|bot=%s|userid=%d|type=%s|BotOrderAdd returned %d", nm, uid, type, rc);
+        else if (rc == 0)
+        {
+            /* 0 means it replaced CurrentOrder — the bot acts on it NOW. */
+            ReplyToCommand(client, "OK|order|bot=%s|userid=%d|type=%s|queue=0|active", nm, uid, type);
+            placed++;
+        }
         else
         {
-            /* queue=0 means it replaced CurrentOrder — the bot acts on it now. */
-            ReplyToCommand(client, "OK|order|bot=%s|userid=%d|type=%s|queue=%d", nm, uid, type, rc);
-            placed++;
+            /* Anything above 0 means the bot is still doing something else and will get
+               to this later — or never. Reported as QUEUED rather than OK, because with
+               supersede off that is the state a caller most needs to notice and the one
+               that looks identical to success. */
+            ReplyToCommand(client, "QUEUED|bot=%s|userid=%d|type=%s|behind=%d|not acting on it yet", nm, uid, type, rc);
+            queued++;
         }
     }
 
-    ReplyToCommand(client, "ORDER|placed=%d|of=%d", placed, n);
+    ReplyToCommand(client, "ORDER|placed=%d|queued=%d|of=%d", placed, queued, n);
     return Plugin_Handled;
 }
 
