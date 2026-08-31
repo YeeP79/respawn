@@ -1,7 +1,7 @@
 {
   "displayName": "Left 4 Dead 2 (modded)",
   "engine": "source",
-  "notes": "Source engine, rcon over TCP via the sidecar. The vanilla surface plus what the mods add. Every entry below was exercised against a live srcds 2.2.4.3 (build 9309) on the shipping modded image, 2026-08-30. TWO CONSTRAINTS THAT ARE NOT ERRORS, and they are different from each other: (1) All4Dead2's director commands run through FakeClientCommand, so they need A CLIENT PRESENT — on an empty server they throw `Client index 0 is invalid` and log a stack trace; with anyone connected, a bot included, they work. (2) a4d_spawn_item and a4d_spawn_weapon are a HARDER case and are absent here on purpose: they route through the `give` console command, which hard-refuses a console caller however many players are connected (S2). sm_rd_give exists because of that. The slot cvars are declared but LEFT AT STOCK: sv_maxplayers -1 restores the stock 4-player coop check, and sv_setmax (default 18) is the real client ceiling — raising sv_maxplayers past it advertises slots the engine cannot seat, which surfaces as players failing to connect. See docs/spikes/S2.md, S11-S15.",
+  "notes": "Source engine, rcon over TCP via the sidecar. The vanilla surface plus what the mods add. Every entry below was exercised against a live srcds 2.2.4.3 (build 9309) on the shipping modded image, 2026-08-30. TWO CONSTRAINTS THAT ARE NOT ERRORS, and they are different from each other: (1) All4Dead2's director commands run through FakeClientCommand, so they need A CLIENT PRESENT — on an empty server they throw `Client index 0 is invalid` and log a stack trace; with anyone connected, a bot included, they work. (2) a4d_spawn_item and a4d_spawn_weapon are a HARDER case and are absent here on purpose: they route through the `give` console command, which hard-refuses a console caller however many players are connected (S2). sm_rd_give exists because of that. The slot cvars are declared but LEFT AT STOCK: sv_maxplayers -1 restores the stock 4-player coop check, and sv_setmax (default 18) is the real client ceiling — raising sv_maxplayers past it advertises slots the engine cannot seat, which surfaces as players failing to connect. See docs/spikes/S2.md, S11-S15. DIRECTOR CVARS ARE ALL FCVAR_CHEAT, and every one of them carries an explicit `rcon` template because of it. The manifest's DEFAULT set path is the Quake-style `<name> \"<value>\"`, and on these the server answers \"Can't use cheat cvar ... unless the server has sv_cheats set to 1\" and changes nothing — declaring them without the template would have produced seventeen controls that look fine and do nothing. SourceMod's `sm_cvar` bypasses FCVAR_CHEAT, which is the template used. Measured 2026-08-31: plain `z_hunter_limit 2` refused with the cvar still 1; `sm_cvar z_hunter_limit 2` changed it. TO UNDO A TUNING SESSION, CHANGE THE MAP — measured, a map change restores every one of these to its stock value. `a4d_reset_to_defaults` does NOT: it reports \"Restored the default settings\" and only resets the cvars All4Dead2 itself changed, leaving z_minion_limit at whatever it was set to. Each entry's `default` here is the server's own ( def. ) value, so a single cvar can also be put back by hand.",
   "maps": "live",
   "commands": [
     {
@@ -324,6 +324,193 @@
       "mod": "respawn_director",
       "description": "Chat prefix marking a message as addressed to the bots. Filtering server-side keeps ordinary table talk out of the agent's context.",
       "default": "@"
+    },
+    {
+      "name": "z_minion_limit",
+      "description": "How many special infected may be ALIVE AT ONCE, all classes combined. This is the ceiling; the per-class limits below divide it up. Stock 3 with every class capped at 1 is why a coop server can never send two hunters — it picks three DIFFERENT specials, always. Raise this and the per-class caps together or nothing changes.",
+      "default": "3",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_minion_limit \"{value}\""
+    },
+    {
+      "name": "z_hunter_limit",
+      "description": "Max hunters alive at once. Stock 1. Counts against z_minion_limit, so raising this alone just makes hunters more likely to be one of the three, not more numerous overall.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_hunter_limit \"{value}\""
+    },
+    {
+      "name": "z_smoker_limit",
+      "description": "Max smokers alive at once. Stock 1. See z_hunter_limit.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_smoker_limit \"{value}\""
+    },
+    {
+      "name": "z_boomer_limit",
+      "description": "Max boomers alive at once. Stock 1. See z_hunter_limit.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_boomer_limit \"{value}\""
+    },
+    {
+      "name": "z_spitter_limit",
+      "description": "Max spitters alive at once. Stock 1. See z_hunter_limit.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_spitter_limit \"{value}\""
+    },
+    {
+      "name": "z_jockey_limit",
+      "description": "Max jockeys alive at once. Stock 1. See z_hunter_limit.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_jockey_limit \"{value}\""
+    },
+    {
+      "name": "z_charger_limit",
+      "description": "Max chargers alive at once. Stock 1. See z_hunter_limit.",
+      "default": "1",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        31
+      ],
+      "rcon": "sm_cvar z_charger_limit \"{value}\""
+    },
+    {
+      "name": "z_common_limit",
+      "description": "How many common infected may exist at once (the game's own help text). This is the standing horde, not a panic event — raising it makes the map feel busier everywhere, and is the cvar most likely to cost server CPU.",
+      "default": "30",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        90
+      ],
+      "rcon": "sm_cvar z_common_limit \"{value}\""
+    },
+    {
+      "name": "z_mob_spawn_min_size",
+      "description": "Smallest horde the director may send in a mob event. Stock 10. The pair with z_mob_spawn_max_size sets how variable a horde feels; narrowing them makes every rush the same size.",
+      "default": "10",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        90
+      ],
+      "rcon": "sm_cvar z_mob_spawn_min_size \"{value}\""
+    },
+    {
+      "name": "z_mob_spawn_max_size",
+      "description": "Largest ordinary horde. Stock 30. Must be >= z_mob_spawn_min_size or hordes come out at the minimum.",
+      "default": "30",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        90
+      ],
+      "rcon": "sm_cvar z_mob_spawn_max_size \"{value}\""
+    },
+    {
+      "name": "z_mega_mob_size",
+      "description": "Size of the rare 'mega mob' the director reserves for big moments. Stock 50 — already well above z_mob_spawn_max_size, which is what makes it read as an event rather than a horde.",
+      "default": "50",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        120
+      ],
+      "rcon": "sm_cvar z_mega_mob_size \"{value}\""
+    },
+    {
+      "name": "director_relax_min_interval",
+      "description": "Shortest time in seconds the director will stay in its RELAX phase between waves. Stock 30. Lowering this and the max is the single most effective way to make a map feel relentless WITHOUT changing how much is spawned at once — it removes the quiet, not the ceiling.",
+      "default": "30",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        300
+      ],
+      "rcon": "sm_cvar director_relax_min_interval \"{value}\""
+    },
+    {
+      "name": "director_relax_max_interval",
+      "description": "Longest relax phase in seconds. Stock 45. Must be >= the min.",
+      "default": "45",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        300
+      ],
+      "rcon": "sm_cvar director_relax_max_interval \"{value}\""
+    },
+    {
+      "name": "director_intensity_relax_threshold",
+      "description": "All survivors must be below this intensity before a peak is allowed to become a relax (the game's own help text). Stock 0.9. Lowering it makes the director wait for the team to be genuinely calm, so pressure arrives in longer, harder blocks; raising it toward 1.0 lets waves follow each other more quickly.",
+      "default": "0.9",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "rcon": "sm_cvar director_intensity_relax_threshold \"{value}\""
+    },
+    {
+      "name": "z_safe_spawn_range",
+      "description": "Minimum range for spawning special zombies (the game's own help text). Stock 250. Lowering it lets specials appear closer to the team, which reads as unfair rather than hard — the usual reason a server feels cheap.",
+      "default": "250",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        0,
+        2000
+      ],
+      "rcon": "sm_cvar z_safe_spawn_range \"{value}\""
+    },
+    {
+      "name": "z_tank_health",
+      "description": "Tank max health (the game's own help text). Stock 4000 on Normal. Difficulty already scales this, so change it only when you want a tank that differs from the difficulty you have chosen.",
+      "default": "4000",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        1,
+        100000
+      ],
+      "rcon": "sm_cvar z_tank_health \"{value}\""
+    },
+    {
+      "name": "z_witch_health",
+      "description": "Witch max health (the game's own help text). Stock 1000.",
+      "default": "1000",
+      "mod": "director (FCVAR_CHEAT — set via sm_cvar)",
+      "range": [
+        1,
+        100000
+      ],
+      "rcon": "sm_cvar z_witch_health \"{value}\""
     }
   ]
 }
