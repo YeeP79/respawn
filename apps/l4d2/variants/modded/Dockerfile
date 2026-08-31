@@ -180,6 +180,15 @@ RUN set -eux; \
     test -f /addons/sourcemod/plugins/all4dead2.smx; \
     rm -f /tmp/all4dead2.sp
 
+# respawn_director's VScript half. The hold-repair logic lives in a .nut rather than in a
+# string pushed through L4D2_ExecVScriptCode, which has an undocumented size ceiling and
+# REJECTS SILENTLY — a 126-byte block defined while 350 and 425-byte blocks did not.
+#
+# It must be baked into the image, not dropped in later: the game indexes
+# scripts/vscripts/ at MAP LOAD, so a file added mid-map is invisible to DoIncludeScript
+# and the include fails with the file plainly present on disk.
+COPY apps/l4d2/vscript/respawn_director.nut /home/louis/l4d2/left4dead2/scripts/vscripts/respawn_director.nut
+
 # respawn_director — the agent's bridge. Compiled HERE, against this image's own
 # spcomp64 and include tree, so the compiler and the includes are the same ones the
 # server runs. A plugin built against a different SourceMod can load and then misbehave

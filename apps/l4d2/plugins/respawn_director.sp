@@ -75,6 +75,10 @@
 #define PLUGIN_VERSION "0.4.0"
 #define INBOX_MAX      64
 #define MSG_MAXLEN     192
+/* How many times one order may be re-issued before it is given up on. Three because a
+   genuinely reachable point is reached on the first retry; more than that means the
+   destination is not pathable and retrying is just noise. */
+#define RD_REPAIR_MAX  3
 
 public Plugin myinfo =
 {
@@ -120,7 +124,12 @@ public void OnPluginStart()
         "Re-issue a wait order when the bot has been displaced from it (see HOLD REPAIR).",
         _, true, 0.0, true, 1.0);
 
-    CreateTimer(3.0, Timer_RepairHolds, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
+    /* NO TIMER_FLAG_NO_MAPCHANGE. That flag kills the timer on a map change, and this is
+       created in OnPluginStart which does not run again — so the repair died at the first
+       map load and never came back, silently. Measured: RD_Chk returned the right answer
+       when called by hand while the sweep had never run at all. A repeating timer without
+       the flag survives map changes, which is what a permanent background check wants. */
+    CreateTimer(3.0, Timer_RepairHolds, _, TIMER_REPEAT);
 
     RegAdminCmd("sm_rd_inbox",  Cmd_Inbox,  ADMFLAG_ROOT, "Drain pending player messages");
     RegAdminCmd("sm_rd_order",  Cmd_Order,  ADMFLAG_ROOT, "Issue an L4B order: sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]");
@@ -794,42 +803,58 @@ static int FindHuman()
  *     BotReset();
  *     NetProps.SetPropInt(self, "movetype", 0);
  *     self.SetVelocity(Vector(0, 0, 0));
- *     Waiting = true;                       // latched
+ *     Waiting = true;
  *
- * Nothing re-evaluates the position afterwards. So when the engine relocates a survivor
- * bot — which it does routinely to bots left behind by the humans — the bot arrives at
- * the new place and simply freezes again there, with the order still nominally pointing
- * at coordinates it will never walk back to.
+ * Nothing re-evaluates the position afterwards, so a bot moved by anything that does not
+ * tell L4B stays put at the wrong place with the order still nominally in force.
  *
- * MEASURED LIVE 2026-08-31: three bots ordered to hold, player walked ~1700 units, bots
- * ended up beside the player reading `Waiting=true`, `movetype=0`, `Paused=0`, and
- * `OrderType: wait` with a DestPos 1727 units away. Stationary and never returning. To
- * the player that is "hold here" silently becoming "freeze wherever you end up", and it
- * is worse with `pause=0`, which removes the vanilla-AI handoff that would at least have
- * shaken them loose.
+ * TWO DIFFERENT BROKEN HOLDS WERE MEASURED, and that is why this does NOT key on the
+ * `Waiting` latch:
  *
- * The repair: `Waiting == true` AND outside DestRadius of the order's own DestPos is
- * unambiguous — a bot that walked there itself is inside the radius by construction, so
- * this combination can only mean it was moved by something that did not tell L4B. Undo
- * the latch with L4B's own BotMoveReset (it clears Waiting, restores movetype and drops
- * the forced crouch) and re-issue the identical order.
+ *   live 2026-08-31   three bots ordered to hold, player walked ~1700 units. Bots ended
+ *                     beside the player: Waiting=true, movetype=0, Paused=0, DestPos
+ *                     1727 away. Stationary for minutes.
+ *   synthetic         the order's DestPos moved out from under a parked bot. She
+ *                     unlatched, walked partway, and STALLED 585 out with Waiting=false.
  *
- * Done entirely inside the VM so the check costs one call rather than one per bot, and
- * so a displaced bot cannot be seen and then not repaired across two round trips.
+ * A detector keyed on `Waiting` catches the first and misses the second — the first
+ * version of this did exactly that, and never fired in any test. The property both share
+ * is simply NOT GETTING CLOSER, which is also the only one that does not depend on
+ * guessing which internal flag a future L4B leaves set.
+ *
+ * So: a bot with a `wait` order, outside its own DestRadius, whose distance to DestPos
+ * has not meaningfully decreased across consecutive checks, is stuck. Undo the latch with
+ * L4B's own BotMoveReset (it clears Waiting, restores movetype, drops the forced crouch)
+ * and re-issue the identical order.
+ *
+ * REPAIRS ARE CAPPED. A DestPos that cannot be pathed to would otherwise be re-issued for
+ * ever, which turns a stuck bot into a stuck bot plus a log flood. After RD_REPAIR_MAX
+ * attempts the order is cancelled and said so — an unreachable hold is a decision for
+ * whoever placed it, not something to retry silently.
+ *
+ * Done entirely inside the VM so the whole check costs one call rather than one per bot,
+ * and so a stuck bot cannot be seen and then not repaired across two round trips.
  */
 static void DefineRepairFunc()
 {
-    L4D2_ExecVScriptCode(
-        "::RD_RepairHolds <- function() { local n = 0; \
-         foreach (id, b in ::Left4Bots.Bots) { \
-           local s = b.GetScriptScope(); local o = s.CurrentOrder; \
-           if (o && o.OrderType == \"wait\" && o.DestPos && s.Waiting \
-               && (b.GetOrigin() - o.DestPos).Length() > o.DestRadius) { \
-             local p = o.DestPos; local l = o.DestLookAtPos; \
-             local h = o.HoldTime; local c = o.CanPause; \
-             s.BotMoveReset(); s.BotCancelOrders(); \
-             ::Left4Bots.BotOrderAdd(b, \"wait\", null, null, p, l, h, c); n++; } } \
-         return n; }");
+    /* One include, not a program pushed through a string.
+       ExecVScriptCode has an undocumented size ceiling that REJECTS SILENTLY — measured
+       2026-08-31, a 126-byte block defined while 350 and 425-byte blocks did not, and the
+       ~1006 figure in left4dhooks.inc is not it (835 failed too). Quoted literals, `\`
+       continuations and ternary spacing were each ruled out. A .nut has no limit and no
+       escaping, and the logic is readable Squirrel in the repo instead of a one-liner. */
+    L4D2_ExecVScriptCode("DoIncludeScript(\"respawn_director\", null);");
+
+    /* Verify. A repair that is absent but looks installed is worse than one never
+       written, because nobody goes looking for it — which is exactly what four rounds of
+       silent rejection produced before this check existed. */
+    char out[64];
+    if (!VsEval("((\"RD_RepairHolds\" in getroottable()) && (\"RD_Chk\" in getroottable()) && (\"RD_Fix\" in getroottable()) ? 1 : 0).tostring()", out, sizeof(out))
+        || StringToInt(out) != 1)
+    {
+        LogError("[respawn_director] hold repair FAILED TO LOAD — scripts/vscripts/respawn_director.nut is missing from the game tree or did not compile. Holds will not be repaired.");
+        PrintToServer("[respawn_director] hold repair FAILED TO LOAD — holds will not be repaired");
+    }
 }
 
 public void OnMapStart()
@@ -865,13 +890,22 @@ public Action Timer_RepairHolds(Handle timer)
     if (!VsEval("(::RD_RepairHolds()).tostring()", out, sizeof(out)))
         return Plugin_Continue;
 
-    int n = StringToInt(out);
-    if (n > 0)
+    /* The VM returns repairs in the units and give-ups in hundreds — one integer because
+       the return is a convar round trip and two of them would be two. */
+    int raw = StringToInt(out);
+    int gaveup = raw / 100, repaired = raw % 100;
+
+    /* Say so, both of them. A repair nobody can see is indistinguishable from the bug not
+       existing, and this fires exactly when somebody is wondering why their bots moved. */
+    if (repaired > 0)
     {
-        /* Say so. A repair nobody can see is indistinguishable from the bug not existing,
-           and this one fires precisely when somebody is wondering why their bots moved. */
-        LogMessage("[respawn_director] hold repair: re-issued %d displaced wait order(s)", n);
-        PrintToServer("[respawn_director] hold repair: re-issued %d displaced wait order(s)", n);
+        LogMessage("[respawn_director] hold repair: re-issued %d stuck wait order(s)", repaired);
+        PrintToServer("[respawn_director] hold repair: re-issued %d stuck wait order(s)", repaired);
+    }
+    if (gaveup > 0)
+    {
+        LogMessage("[respawn_director] hold repair: gave up on %d unreachable hold(s) after %d tries", gaveup, RD_REPAIR_MAX);
+        PrintToServer("[respawn_director] hold repair: gave up on %d unreachable hold(s) after %d tries", gaveup, RD_REPAIR_MAX);
     }
     return Plugin_Continue;
 }
