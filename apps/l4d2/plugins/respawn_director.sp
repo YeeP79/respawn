@@ -60,6 +60,7 @@
  *   sm_rd_cancel <target> [type]   drop queued orders
  *   sm_rd_orders <target>          read back each bot's queue
  *   sm_rd_status           bots, humans, and whether the L4B order API is reachable
+ *   (a `wait` order is also repaired automatically — see HOLD REPAIR below)
  *   sm_rd_scene            tactical readout
  *   sm_rd_give <ent> [who] grant an item (operator-gated)
  */
@@ -71,7 +72,7 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "0.3.0"
+#define PLUGIN_VERSION "0.4.0"
 #define INBOX_MAX      64
 #define MSG_MAXLEN     192
 
@@ -100,6 +101,10 @@ ConVar g_cvEnabled;
    everything upstream says yes. Default off, opt in deliberately. */
 ConVar g_cvAllowGive;
 
+/* See HOLD REPAIR. Default on, because the failure it fixes is silent and the repair
+   costs one VM call every few seconds. */
+ConVar g_cvHoldRepair;
+
 public void OnPluginStart()
 {
     g_Inbox = new ArrayList(ByteCountToCells(MSG_MAXLEN));
@@ -111,6 +116,11 @@ public void OnPluginStart()
     g_cvAllowGive = CreateConVar("rd_allow_give", "0",
         "Allow the agent to grant weapons/items (a cheat). Operator decision; off by default.",
         _, true, 0.0, true, 1.0);
+    g_cvHoldRepair = CreateConVar("rd_hold_repair", "1",
+        "Re-issue a wait order when the bot has been displaced from it (see HOLD REPAIR).",
+        _, true, 0.0, true, 1.0);
+
+    CreateTimer(3.0, Timer_RepairHolds, _, TIMER_REPEAT | TIMER_FLAG_NO_MAPCHANGE);
 
     RegAdminCmd("sm_rd_inbox",  Cmd_Inbox,  ADMFLAG_ROOT, "Drain pending player messages");
     RegAdminCmd("sm_rd_order",  Cmd_Order,  ADMFLAG_ROOT, "Issue an L4B order: sm_rd_order <target> <type> [at=x,y,z] [look=x,y,z] [ent=N] [hold=S] [pause=0|1]");
@@ -395,9 +405,40 @@ static int ResolveTargets(const char[] target, int[] out, int maxout)
         }
         char nm[MAX_NAME_LENGTH];
         GetClientName(i, nm, sizeof(nm));
-        if (StrContains(nm, target, false) != -1) { out[n++] = i; break; }
+        /* Collect EVERY name match rather than taking the first. Survivor names are not
+           unique: a bot spawned to replace a lost one arrives as a duplicate of an
+           existing survivor (measured 2026-08-31 — the game itself then reports
+           "Ellis saved Ellis"), and with two Ellises `sm_rd_order Ellis` matched one,
+           reported OK and of=1, and gave no hint the other existed. The caller decides
+           what to do about the ambiguity; this function must not decide for them. */
+        if (StrContains(nm, target, false) != -1) out[n++] = i;
     }
     return n;
+}
+
+/** Do two or more living survivor bots answer to this name? */
+static bool IsAmbiguousName(const char[] target)
+{
+    if (StrEqual(target, "all", false) || StrEqual(target, "bots", false)
+        || StrEqual(target, "team", false) || target[0] == '#')
+        return false;
+    int bots[MAXPLAYERS + 1];
+    return ResolveTargets(target, bots, sizeof(bots)) > 1;
+}
+
+/** Names of every living survivor bot matching `target`, with userids, for an error. */
+static void DescribeMatches(const char[] target, char[] out, int maxlen)
+{
+    out[0] = '\0';
+    int bots[MAXPLAYERS + 1];
+    int n = ResolveTargets(target, bots, sizeof(bots));
+    for (int i = 0; i < n; i++)
+    {
+        char nm[MAX_NAME_LENGTH], one[80];
+        GetClientName(bots[i], nm, sizeof(nm));
+        Format(one, sizeof(one), "%s#%d(%s)", (i > 0) ? " " : "", GetClientUserId(bots[i]), nm);
+        StrCat(out, maxlen, one);
+    }
 }
 
 /** Parse "x,y,z" (or "x y z") into a vector. False when it is not three numbers. */
@@ -536,6 +577,16 @@ public Action Cmd_Order(int client, int args)
         return Plugin_Handled;
     }
 
+    if (IsAmbiguousName(target))
+    {
+        /* Refuse rather than pick. Addressing the wrong bot is not visibly different
+           from addressing the right one, so a guess here is unrecoverable. */
+        char who[256];
+        DescribeMatches(target, who, sizeof(who));
+        ReplyToCommand(client, "ERR|ambiguous|%s|matches: %s|address one with #userid, or use all", target, who);
+        return Plugin_Handled;
+    }
+
     int bots[MAXPLAYERS + 1];
     int n = ResolveTargets(target, bots, sizeof(bots));
     if (n == 0)
@@ -636,6 +687,16 @@ public Action Cmd_Cancel(int client, int args)
         return Plugin_Handled;
     }
 
+    if (IsAmbiguousName(target))
+    {
+        /* Refuse rather than pick. Addressing the wrong bot is not visibly different
+           from addressing the right one, so a guess here is unrecoverable. */
+        char who[256];
+        DescribeMatches(target, who, sizeof(who));
+        ReplyToCommand(client, "ERR|ambiguous|%s|matches: %s|address one with #userid, or use all", target, who);
+        return Plugin_Handled;
+    }
+
     int bots[MAXPLAYERS + 1];
     int n = ResolveTargets(target, bots, sizeof(bots));
     if (n == 0)
@@ -722,6 +783,97 @@ static int FindHuman()
         if (IsClientInGame(i) && !IsFakeClient(i))
             return i;
     return 0;
+}
+
+/* ---------- HOLD REPAIR ----------------------------------------------------- */
+
+/**
+ * L4B's `wait` does not steer a bot to a spot and keep it there. It walks the bot there
+ * ONCE and then FREEZES it:
+ *
+ *     BotReset();
+ *     NetProps.SetPropInt(self, "movetype", 0);
+ *     self.SetVelocity(Vector(0, 0, 0));
+ *     Waiting = true;                       // latched
+ *
+ * Nothing re-evaluates the position afterwards. So when the engine relocates a survivor
+ * bot — which it does routinely to bots left behind by the humans — the bot arrives at
+ * the new place and simply freezes again there, with the order still nominally pointing
+ * at coordinates it will never walk back to.
+ *
+ * MEASURED LIVE 2026-08-31: three bots ordered to hold, player walked ~1700 units, bots
+ * ended up beside the player reading `Waiting=true`, `movetype=0`, `Paused=0`, and
+ * `OrderType: wait` with a DestPos 1727 units away. Stationary and never returning. To
+ * the player that is "hold here" silently becoming "freeze wherever you end up", and it
+ * is worse with `pause=0`, which removes the vanilla-AI handoff that would at least have
+ * shaken them loose.
+ *
+ * The repair: `Waiting == true` AND outside DestRadius of the order's own DestPos is
+ * unambiguous — a bot that walked there itself is inside the radius by construction, so
+ * this combination can only mean it was moved by something that did not tell L4B. Undo
+ * the latch with L4B's own BotMoveReset (it clears Waiting, restores movetype and drops
+ * the forced crouch) and re-issue the identical order.
+ *
+ * Done entirely inside the VM so the check costs one call rather than one per bot, and
+ * so a displaced bot cannot be seen and then not repaired across two round trips.
+ */
+static void DefineRepairFunc()
+{
+    L4D2_ExecVScriptCode(
+        "::RD_RepairHolds <- function() { local n = 0; \
+         foreach (id, b in ::Left4Bots.Bots) { \
+           local s = b.GetScriptScope(); local o = s.CurrentOrder; \
+           if (o && o.OrderType == \"wait\" && o.DestPos && s.Waiting \
+               && (b.GetOrigin() - o.DestPos).Length() > o.DestRadius) { \
+             local p = o.DestPos; local l = o.DestLookAtPos; \
+             local h = o.HoldTime; local c = o.CanPause; \
+             s.BotMoveReset(); s.BotCancelOrders(); \
+             ::Left4Bots.BotOrderAdd(b, \"wait\", null, null, p, l, h, c); n++; } } \
+         return n; }");
+}
+
+public void OnMapStart()
+{
+    /* The VM is rebuilt on every map change, so the function has to be redefined. Delayed
+       because Left4Bots is not loaded at the instant the map starts and the definition
+       references nothing until it runs — but a caller might. */
+    CreateTimer(10.0, Timer_DefineRepair);
+}
+
+public Action Timer_DefineRepair(Handle timer)
+{
+    DefineRepairFunc();
+    return Plugin_Stop;
+}
+
+public Action Timer_RepairHolds(Handle timer)
+{
+    if (!g_cvHoldRepair.BoolValue || !L4BReady())
+        return Plugin_Continue;
+
+    char out[64];
+    /* Define-if-missing rather than trusting OnMapStart: a plugin reloaded mid-map has
+       never run it, and a silent no-op repair is exactly the failure this exists to
+       remove. */
+    if (!VsEval("((\"RD_RepairHolds\" in getroottable()) ? 1 : 0).tostring()", out, sizeof(out))
+        || StringToInt(out) != 1)
+    {
+        DefineRepairFunc();
+        return Plugin_Continue;
+    }
+
+    if (!VsEval("(::RD_RepairHolds()).tostring()", out, sizeof(out)))
+        return Plugin_Continue;
+
+    int n = StringToInt(out);
+    if (n > 0)
+    {
+        /* Say so. A repair nobody can see is indistinguishable from the bug not existing,
+           and this one fires precisely when somebody is wondering why their bots moved. */
+        LogMessage("[respawn_director] hold repair: re-issued %d displaced wait order(s)", n);
+        PrintToServer("[respawn_director] hold repair: re-issued %d displaced wait order(s)", n);
+    }
+    return Plugin_Continue;
 }
 
 /* ---------- give: what All4Dead2 cannot do over rcon ------------------------ */
@@ -946,7 +1098,7 @@ public Action Cmd_Scene(int client, int args)
 
 public Action Cmd_Status(int client, int args)
 {
-    int humans = 0, bots = 0;
+    int humans = 0, bots = 0, infected = 0;
     char names[512];
     for (int i = 1; i <= MaxClients; i++)
     {
@@ -954,6 +1106,16 @@ public Action Cmd_Status(int client, int args)
             continue;
         if (IsFakeClient(i))
         {
+            /* Only LIVING SURVIVOR bots. It used to count every fake client, so AI
+               specials on the other team inflated the number an agent reads to decide
+               whether it can order anything — measured reporting bots=5 (Coach, Ellis,
+               Rochelle, Jockey, Hunter) on a server with two orderable bots, one of the
+               named three already gone. */
+            if (GetClientTeam(i) != 2 || !IsPlayerAlive(i))
+            {
+                if (GetClientTeam(i) == 3) infected++;
+                continue;
+            }
             bots++;
             char n[MAX_NAME_LENGTH];
             GetClientName(i, n, sizeof(n));
@@ -967,7 +1129,7 @@ public Action Cmd_Status(int client, int args)
        tracks the thing that actually gates an order now, which is whether Left4Bots is
        loaded and running a mode. Reporting the old condition would have said "ready"
        on a server where every order silently fails. */
-    ReplyToCommand(client, "STATUS|humans=%d|bots=%d|botnames=%s|orders_ready=%d|inbox=%d|api=vscript",
-        humans, bots, names, L4BReady() ? 1 : 0, g_Inbox.Length);
+    ReplyToCommand(client, "STATUS|humans=%d|bots=%d|botnames=%s|infected_ai=%d|orders_ready=%d|inbox=%d|api=vscript",
+        humans, bots, names, infected, L4BReady() ? 1 : 0, g_Inbox.Length);
     return Plugin_Handled;
 }
