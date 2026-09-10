@@ -1,7 +1,7 @@
 {
   "displayName": "Left 4 Dead 2 (modded)",
   "engine": "source",
-  "notes": "Source engine, rcon over TCP via the sidecar. The vanilla surface plus what the mods add. Every entry below was exercised against a live srcds 2.2.4.3 (build 9309) on the shipping modded image, 2026-08-30. TWO CONSTRAINTS THAT ARE NOT ERRORS, and they are different from each other: (1) All4Dead2's director commands run through FakeClientCommand, so they need A CLIENT PRESENT — on an empty server they throw `Client index 0 is invalid` and log a stack trace; with anyone connected, a bot included, they work. (2) a4d_spawn_item and a4d_spawn_weapon are a HARDER case and are absent here on purpose: they route through the `give` console command, which hard-refuses a console caller however many players are connected (S2). sm_rd_give exists because of that. THE COOP CAP IS NO LONGER AT STOCK: as of 2026-09-10 this service runs 8 human players. It is set from GAME_ENV_MAX_PLAYERS at container start (respawn-init.sh writes sv_maxplayers and sv_visiblemaxplayers into a cfg server.cfg execs), NOT by anything in this manifest — so setting sv_maxplayers here changes the running server and is reverted by the next restart, and a map change does not revert it because server.cfg re-execs. sv_maxplayers -1 restores the stock 4-player coop check. sv_setmax (default 18) is the real client ceiling and is deliberately NOT set, because 18 already covers 8 humans plus the survivor bots filling the empty slots — raising sv_maxplayers past it advertises slots the engine cannot seat, which surfaces as players failing to connect. See docs/spikes/S2.md, S11-S15. DIRECTOR CVARS ARE ALL FCVAR_CHEAT, and every one of them carries an explicit `rcon` template because of it. The manifest's DEFAULT set path is the Quake-style `<name> \"<value>\"`, and on these the server answers \"Can't use cheat cvar ... unless the server has sv_cheats set to 1\" and changes nothing — declaring them without the template would have produced seventeen controls that look fine and do nothing. SourceMod's `sm_cvar` bypasses FCVAR_CHEAT, which is the template used. Measured 2026-08-31: plain `z_hunter_limit 2` refused with the cvar still 1; `sm_cvar z_hunter_limit 2` changed it. TO UNDO A TUNING SESSION, CHANGE THE MAP — measured, a map change restores every one of these to its stock value. `a4d_reset_to_defaults` does NOT: it reports \"Restored the default settings\" and only resets the cvars All4Dead2 itself changed, leaving z_minion_limit at whatever it was set to. Each entry's `default` here is the server's own ( def. ) value, so a single cvar can also be put back by hand.",
+  "notes": "Source engine, rcon over TCP via the sidecar. The vanilla surface plus what the mods add. Every entry below was exercised against a live srcds 2.2.4.3 (build 9309) on the shipping modded image, 2026-08-30. THE ALL4DEAD2 COMMANDS SPLIT THREE WAYS BY WHETHER THEY NEED A PLAYER, and the split is not guessable from what a command does — re-measured on an empty hibernating server 2026-09-10. (1a) CVAR PATH — force_tank, force_witch, panic_forever, continuous_bosses, add_zombies, reset_director — only move a cvar and therefore work ALWAYS, including with nobody connected at all (`a4d_force_tank 1` succeeded on a 0-human 0-bot hibernating server). Do NOT withhold these from a freshly woken server. (1b) CLIENT PATH — force_panic, spawn_infected — run through FakeClientCommand against an arbitrary connected client, so they need somebody present; a bot counts. On an empty server they throw `Client index 0 is invalid` with a stack trace (measured on spawn_infected, same day). force_panic being in THIS class while force_tank and force_witch are not is the counter-intuitive part. (1c) NEVER POSSIBLE OVER RCON: a4d_spawn_item and a4d_spawn_weapon are absent here on purpose: they route through the `give` console command, which hard-refuses a console caller however many players are connected (S2). sm_rd_give exists because of that. THE COOP CAP IS NO LONGER AT STOCK: as of 2026-09-10 this service runs 8 human players. It is set from GAME_ENV_MAX_PLAYERS at container start (respawn-init.sh writes sv_maxplayers and sv_visiblemaxplayers into a cfg server.cfg execs), NOT by anything in this manifest — so setting sv_maxplayers here changes the running server and is reverted by the next restart, and a map change does not revert it because server.cfg re-execs. sv_maxplayers -1 restores the stock 4-player coop check. sv_setmax (default 18) is the real client ceiling and is deliberately NOT set, because 18 already covers 8 humans plus the survivor bots filling the empty slots — raising sv_maxplayers past it advertises slots the engine cannot seat, which surfaces as players failing to connect. See docs/spikes/S2.md, S11-S15. DIRECTOR CVARS ARE ALL FCVAR_CHEAT, and every one of them carries an explicit `rcon` template because of it. The manifest's DEFAULT set path is the Quake-style `<name> \"<value>\"`, and on these the server answers \"Can't use cheat cvar ... unless the server has sv_cheats set to 1\" and changes nothing — declaring them without the template would have produced seventeen controls that look fine and do nothing. SourceMod's `sm_cvar` bypasses FCVAR_CHEAT, which is the template used. Measured 2026-08-31: plain `z_hunter_limit 2` refused with the cvar still 1; `sm_cvar z_hunter_limit 2` changed it. TO UNDO A TUNING SESSION, CHANGE THE MAP — measured, a map change restores every one of these to its stock value. `a4d_reset_to_defaults` does NOT: it reports \"Restored the default settings\" and only resets the cvars All4Dead2 itself changed, leaving z_minion_limit at whatever it was set to. Each entry's `default` here is the server's own ( def. ) value, so a single cvar can also be put back by hand.",
   "maps": "live",
   "commands": [
     {
@@ -104,20 +104,30 @@
     {
       "name": "force_panic",
       "mod": "all4dead2",
-      "description": "Trigger a panic event. Needs a client present (see notes).",
+      "description": "Trigger a single panic event. CLIENT PATH - needs somebody connected (a bot counts); on an empty server it throws `Client index 0 is invalid`. Note this is the odd one out: force_tank and force_witch are cvar path and work on an empty server, this does not.",
       "rcon": "a4d_force_panic"
     },
     {
       "name": "force_tank",
       "mod": "all4dead2",
-      "description": "Have the director place a Tank. Director-placed and therefore slow to arrive - unlike a spawn, which is instant and local.",
-      "rcon": "a4d_force_tank"
+      "description": "Guarantee a Tank this round (1), or stop guaranteeing one (0). Director-placed and therefore slow to arrive - unlike spawn_infected, which is instant and local. THE ARGUMENT IS REQUIRED: bare a4d_force_tank answers \"Usage: a4d_force_tank <0|1>\" and does nothing. Cvar path, so it works on an EMPTY server. reset_director also clears it.",
+      "rcon": "a4d_force_tank {enabled}",
+      "args": {
+        "enabled": {
+          "description": "1 | 0"
+        }
+      }
     },
     {
       "name": "force_witch",
       "mod": "all4dead2",
-      "description": "Have the director place a Witch. Director-placed and slow, as force_tank.",
-      "rcon": "a4d_force_witch"
+      "description": "Guarantee a Witch this round (1), or stop guaranteeing one (0). Director-placed and therefore slow to arrive - unlike spawn_infected, which is instant and local. THE ARGUMENT IS REQUIRED: bare a4d_force_witch answers \"Usage: a4d_force_witch <0|1>\" and does nothing. Cvar path, so it works on an EMPTY server. reset_director also clears it.",
+      "rcon": "a4d_force_witch {enabled}",
+      "args": {
+        "enabled": {
+          "description": "1 | 0"
+        }
+      }
     },
     {
       "name": "add_zombies",
