@@ -98,7 +98,6 @@ function fillTemplate(template: string, args: Record<string, string>): string {
 const REGION = process.env['RESPAWN_REGION'] ?? process.env['AWS_REGION'] ?? 'us-east-1';
 const PROFILE = process.env['RESPAWN_PROFILE'] ?? process.env['AWS_PROFILE'];
 
-const awsOpts = { region: REGION, profile: PROFILE };
 
 /**
  * AWS target for one service, preferring what the service DECLARES over this process's
@@ -121,6 +120,40 @@ function awsOptsFor(svc: DiscoveredService): ResolvedAwsTarget {
     region: REGION,
     ...(PROFILE ? { profile: PROFILE } : {}),
   });
+}
+
+/** The process environment's target, used when nothing better is known. */
+function fallbackAwsOpts(): ResolvedAwsTarget {
+  return { region: REGION, ...(PROFILE ? { profile: PROFILE } : {}) };
+}
+
+/**
+ * AWS target for a service NAME, for the call sites that hold a string rather than a
+ * DiscoveredService — health, logs, metrics, and rcon target resolution.
+ *
+ * A name that is not a configured service falls back to the process environment rather
+ * than throwing: these are read paths, and their own "not running" message is a better
+ * error than one about discovery.
+ */
+function awsOptsForName(service: string, environment: Environment = 'dev'): ResolvedAwsTarget {
+  const match = discoverServices(WORKSPACE_ROOT, environment).find((s) => s.name === service);
+  return match ? awsOptsFor(match) : fallbackAwsOpts();
+}
+
+/**
+ * Every distinct account+region the configured fleet spans.
+ *
+ * A single scan cannot see the whole fleet: ut99 and l4d2-modded live in a different
+ * account and region from everything else, so a listing built from one target silently
+ * omits them and reads as "those servers are not running".
+ */
+function distinctAwsTargets(environment: Environment = 'dev'): ResolvedAwsTarget[] {
+  const seen = new Map<string, ResolvedAwsTarget>();
+  for (const svc of discoverServices(WORKSPACE_ROOT, environment)) {
+    const t = awsOptsFor(svc);
+    seen.set(`${t.region}|${t.profile ?? ''}`, t);
+  }
+  return seen.size > 0 ? [...seen.values()] : [fallbackAwsOpts()];
 }
 
 // Lifecycle tools (deploy/destroy/synth/...) read the repo — Dockerfiles, .env files,
@@ -203,14 +236,15 @@ function actionContext(service: DiscoveredService, environment: Environment) {
 
 /** Resolves a service to its running task, or undefined if it is not up. */
 async function findTarget(service: string): Promise<ExecTarget | undefined> {
-  const servers = await discoverRconServers(awsOpts);
+  const opts = awsOptsForName(service);
+  const servers = await discoverRconServers(opts);
   const match = servers.find((s) => s.service === service);
   if (!match) return undefined;
   return {
     cluster: match.cluster,
     task: match.task,
     container: RCON_CONTAINER_NAME,
-    ...awsOpts,
+    ...opts,
   };
 }
 
@@ -218,7 +252,7 @@ async function findTarget(service: string): Promise<ExecTarget | undefined> {
 async function resolveTarget(service: string): Promise<ExecTarget> {
   const target = await findTarget(service);
   if (!target) {
-    const servers = await discoverRconServers(awsOpts);
+    const servers = await discoverRconServers(awsOptsForName(service));
     const available = servers.map((s) => s.service).join(', ') || '(none running)';
     throw new Error(
       `No running rcon-capable server named "${service}". Available: ${available}. ` +
@@ -353,12 +387,42 @@ server.registerTool(
     inputSchema: {},
   },
   async () => {
-    const servers = await discoverRconServers(awsOpts);
-    if (servers.length === 0) {
-      return textResult('No running rcon-capable servers.');
-    }
+    // One scan cannot see the whole fleet — ut99 and l4d2-modded live in a different
+    // account and region from the rest — so every distinct target is swept.
+    const targets = distinctAwsTargets();
+    const results = await Promise.allSettled(
+      targets.map(async (opts) => ({ opts, servers: await discoverRconServers(opts) })),
+    );
+
+    const servers = results.flatMap((r) =>
+      r.status === 'fulfilled' ? r.value.servers : [],
+    );
+    // A target whose credentials have lapsed must not read as "nothing is running there".
+    // Reported, never swallowed: the honest answer is a partial listing that says so.
+    const unreachable = results.flatMap((r, i) =>
+      r.status === 'rejected'
+        ? [`${targets[i]!.region}/${targets[i]!.profile ?? '(default)'}`]
+        : [],
+    );
+
     const lines = servers.map((s) => `- ${s.service}  (cluster ${s.cluster})`);
-    return textResult(`Controllable servers:\n${lines.join('\n')}`);
+    const notes =
+      unreachable.length > 0
+        ? [
+            '',
+            `Could not reach ${unreachable.length} of ${targets.length} account(s): ` +
+              `${unreachable.join(', ')}. Servers there are NOT listed above — this is a ` +
+              'partial answer, not an empty one. Re-authenticate that profile.',
+          ]
+        : [];
+
+    if (servers.length === 0) {
+      return textResult(
+        ['No running rcon-capable servers.', ...notes].join('\n'),
+        unreachable.length > 0,
+      );
+    }
+    return textResult([`Controllable servers:`, ...lines, ...notes].join('\n'));
   },
 );
 
@@ -666,7 +730,7 @@ server.registerTool(
     // The running set comes from the engine's own LoadMap line, not the `rules` query —
     // rules reports display names ("MapVote MVE2h"), which cannot be turned back into
     // the classes a travel needs.
-    const { events } = await fetchLogs(service, awsOpts, {
+    const { events } = await fetchLogs(service, awsOptsForName(service), {
       container: 'game-server',
       pattern: 'LoadMap',
       minutes: 1440,
@@ -731,7 +795,7 @@ server.registerTool(
     // "confirms" the mutator set we just replaced, which looks like the change silently
     // failed. CloudWatch also lags a few seconds behind the engine, so an empty result
     // here means "too early to tell", never "it did not work".
-    const after = await fetchLogs(service, awsOpts, {
+    const after = await fetchLogs(service, awsOptsForName(service), {
       container: 'game-server',
       pattern: 'Add mutator',
       minutes: 5,
@@ -989,7 +1053,7 @@ server.registerTool(
     inputSchema: { service: z.string().describe('Service name, e.g. "doom2"') },
   },
   async ({ service }) => {
-    const h = await fetchHealth(service, awsOpts);
+    const h = await fetchHealth(service, awsOptsForName(service));
     const lines: string[] = [
       `${h.service} (${h.cluster})`,
       `  desired=${h.desired} running=${h.running} pending=${h.pending}` +
@@ -1044,7 +1108,7 @@ server.registerTool(
   },
   async ({ service, minutes, resolution, series }) => {
     const period = resolution === '1m' ? 60 : 300;
-    const m = await fetchMetrics(service, minutes ?? 60, awsOpts, period);
+    const m = await fetchMetrics(service, minutes ?? 60, awsOptsForName(service), period);
     const showSeries = series ?? true;
     const lines = [
       `${m.service} — last ${m.minutes}m @ ${m.periodSeconds}s (task: ${m.taskCpuUnits ?? '?'} cpu / ${m.taskMemoryMiB ?? '?'} MiB)`,
@@ -1118,7 +1182,7 @@ server.registerTool(
     },
   },
   async ({ service, container, minutes, since, until, pattern, limit }) => {
-    const { logGroup, events } = await fetchLogs(service, awsOpts, {
+    const { logGroup, events } = await fetchLogs(service, awsOptsForName(service), {
       ...(container !== undefined ? { container } : {}),
       ...(minutes !== undefined ? { minutes } : {}),
       ...(since !== undefined ? { since } : {}),
