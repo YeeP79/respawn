@@ -56,6 +56,7 @@ import {
   buildTravelCommand,
   unknownMutators,
 } from './mutators.js';
+import { resolveAwsTarget, type ResolvedAwsTarget } from './aws-target.js';
 import {
   discoverServices,
   synth as coreSynth,
@@ -98,6 +99,29 @@ const REGION = process.env['RESPAWN_REGION'] ?? process.env['AWS_REGION'] ?? 'us
 const PROFILE = process.env['RESPAWN_PROFILE'] ?? process.env['AWS_PROFILE'];
 
 const awsOpts = { region: REGION, profile: PROFILE };
+
+/**
+ * AWS target for one service, preferring what the service DECLARES over this process's
+ * environment.
+ *
+ * A service's .env is the single source of truth for where it lives — apps/ut99 and
+ * apps/l4d2's modded variant deploy to a different account and region from the rest of
+ * the fleet. RESPAWN_PROFILE / RESPAWN_REGION are a fallback for a service that declares
+ * nothing, never an override.
+ *
+ * Region already worked this way and profile did not, which is the worst of both: a call
+ * reached the right REGION with the wrong ACCOUNT's credentials. check_secrets then
+ * reported a cross-account service's existing secrets as missing and advised creating
+ * them, which would have written duplicates into the wrong account; and every lifecycle
+ * action forced its profile over the declaration, the same trap `pnpm respawn`'s
+ * hardcoded --profile sets for the CLI.
+ */
+function awsOptsFor(svc: DiscoveredService): ResolvedAwsTarget {
+  return resolveAwsTarget(svc.config.aws, {
+    region: REGION,
+    ...(PROFILE ? { profile: PROFILE } : {}),
+  });
+}
 
 // Lifecycle tools (deploy/destroy/synth/...) read the repo — Dockerfiles, .env files,
 // the CDK app — unlike the control tools, which only need AWS. The repo root defaults
@@ -173,7 +197,7 @@ function actionContext(service: DiscoveredService, environment: Environment) {
     service,
     environment,
     workspaceRoot: WORKSPACE_ROOT,
-    ...(PROFILE ? { profile: PROFILE } : {}),
+    ...(awsOptsFor(service).profile ? { profile: awsOptsFor(service).profile } : {}),
   };
 }
 
@@ -495,8 +519,9 @@ server.registerTool(
     },
   },
   async ({ service, environment }) => {
-    const config = resolveConfiguredService(service, environment).config;
-    const region = config.aws.region ?? REGION;
+    const svc = resolveConfiguredService(service, environment);
+    const config = svc.config;
+    const { region, profile } = awsOptsFor(svc);
     const refs = config.secretRefs;
     if (refs.length === 0) return textResult(`${service} declares no SECRET_REFS.`);
 
@@ -507,13 +532,13 @@ server.registerTool(
           store: ref.store,
           sourceId: ref.sourceId,
           region,
-          ...(PROFILE ? { profile: PROFILE } : {}),
+          ...(profile ? { profile } : {}),
         }),
       })),
     );
     const missing = checked.filter((c) => !c.exists);
     const lines = [
-      `${service} secrets in ${region} (account of profile ${PROFILE ?? '(default)'}):`,
+      `${service} secrets in ${region} (account of profile ${profile ?? '(default)'}):`,
       ...checked.map(
         ({ ref, exists }) =>
           `  ${exists ? '✓' : '✗'} ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId}`,
@@ -568,7 +593,8 @@ server.registerTool(
         true,
       );
     }
-    const config = resolveConfiguredService(service, environment).config;
+    const svc = resolveConfiguredService(service, environment);
+    const config = svc.config;
     const ref = config.secretRefs.find((r) => r.containerEnvVar === secret);
     if (!ref) {
       const known = config.secretRefs.map((r) => r.containerEnvVar).join(', ') || '(none)';
@@ -588,13 +614,13 @@ server.registerTool(
       () => ALPHABET[randomInt(ALPHABET.length)]!,
     ).join('');
 
-    const region = config.aws.region ?? REGION;
+    const { region, profile } = awsOptsFor(svc);
     await setSecret({
       store: ref.store,
       sourceId: ref.sourceId,
       value,
       region,
-      ...(PROFILE ? { profile: PROFILE } : {}),
+      ...(profile ? { profile } : {}),
     });
 
     const lines = [
@@ -1291,11 +1317,12 @@ server.registerTool(
         true,
       );
     }
+    const svc = resolveConfiguredService(service, environment);
     return actionResult(
       await coreScale({
-        ...actionContext(resolveConfiguredService(service, environment), environment),
+        ...actionContext(svc, environment),
         desiredCount,
-        region: REGION,
+        region: awsOptsFor(svc).region,
       }),
     );
   },
@@ -1654,7 +1681,8 @@ server.registerTool(
         true,
       );
     }
-    const config = resolveConfiguredService(service, environment).config;
+    const svc = resolveConfiguredService(service, environment);
+    const config = svc.config;
     const ref = config.secretRefs.find((r) => r.containerEnvVar === secret);
     if (!ref) {
       const known = config.secretRefs.map((r) => r.containerEnvVar).join(', ') || '(none)';
@@ -1667,8 +1695,7 @@ server.registerTool(
       store: ref.store,
       sourceId: ref.sourceId,
       ...(ref.jsonKey ? { jsonKey: ref.jsonKey } : {}),
-      region: config.aws.region ?? REGION,
-      ...(PROFILE ? { profile: PROFILE } : {}),
+      ...awsOptsFor(svc),
     });
     if (value === undefined) {
       return textResult(
