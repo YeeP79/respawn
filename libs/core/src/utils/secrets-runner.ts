@@ -17,19 +17,44 @@ export interface SetSecretOptions {
 }
 
 /**
+ * What a presence check could establish.
+ *
+ * `unknown` exists because "the secret is not there" and "I could not look" are
+ * different facts with opposite remedies, and the AWS CLI reports both as a non-zero
+ * exit. Collapsing them told an operator that secrets which exist perfectly well were
+ * missing, and advised creating them — which, against the wrong account, writes
+ * duplicates into it.
+ */
+export type SecretPresence =
+  | { status: 'present' }
+  | { status: 'absent' }
+  | { status: 'unknown'; reason: string };
+
+/**
+ * The CLI's not-found errors, per store. Anything else — an expired SSO session, a
+ * denial, a network failure — is a failure to LOOK, not evidence of absence.
+ *
+ * Matched on the error code rather than the prose, which is localised and reworded
+ * between CLI versions.
+ */
+const NOT_FOUND = /ResourceNotFoundException|ParameterNotFound/;
+
+/**
  * Reports whether a referenced secret/parameter already exists.
  *
  * ECS resolves `secrets:` before starting the container and CDK only synthesises
  * an ARN — it never checks existence — so a missing secret surfaces as an opaque
  * `ResourceInitializationError` after a full deploy. Checking up front turns that
  * into an actionable message. Never reads the value.
+ *
+ * Returns three outcomes rather than a boolean: see {@link SecretPresence}.
  */
-export async function secretExists(opts: {
+export async function checkSecret(opts: {
   store: 'sm' | 'ssm';
   sourceId: string;
   region?: string;
   profile?: string;
-}): Promise<boolean> {
+}): Promise<SecretPresence> {
   const args =
     opts.store === 'ssm'
       ? ['ssm', 'get-parameter', '--name', opts.sourceId]
@@ -39,13 +64,22 @@ export async function secretExists(opts: {
     profile: opts.profile,
     region: opts.region,
   });
-  return res.exitCode === 0;
+
+  if (res.exitCode === 0) return { status: 'present' };
+  if (NOT_FOUND.test(res.stderr)) return { status: 'absent' };
+
+  // Keep it to one line: this is rendered inline per secret, and the CLI's multi-line
+  // tracebacks would bury the list being reported.
+  const reason =
+    res.stderr.trim().split('\n').filter(Boolean).pop() ??
+    `aws exited ${res.exitCode} with no stderr`;
+  return { status: 'unknown', reason };
 }
 
 /**
  * Reads a secret's plaintext value back.
  *
- * Deliberately separate from `secretExists`, which never reads a value: most callers
+ * Deliberately separate from `checkSecret`, which never reads a value: most callers
  * only need presence, and a helper that returned the value "in case" would put
  * credentials into logs and transcripts as a side effect of an existence check.
  * Disclosure should be something a caller asks for by name — which is why this is its

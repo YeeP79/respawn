@@ -10,7 +10,7 @@ import {
 } from '../config/preflight.js';
 import { runCdk } from '../utils/cdk-runner.js';
 import { logger } from '../utils/logger.js';
-import { secretExists } from '../utils/secrets-runner.js';
+import { checkSecret } from '../utils/secrets-runner.js';
 import { serviceStackId, sharedStackId } from '../naming.js';
 import { buildAndPush, resolveImage } from './push.js';
 import { checkUpdates, recordUpdateState } from './updates.js';
@@ -118,19 +118,32 @@ async function preflight(ctx: DeployContext): Promise<void> {
     );
   }
 
-  const absent = (
-    await Promise.all(
-      config.secretRefs.map(async (ref) => ({
-        ref,
-        exists: await secretExists({
-          store: ref.store,
-          sourceId: ref.sourceId,
-          region,
-          profile,
-        }),
-      })),
-    )
-  ).filter((r) => !r.exists);
+  const checked = await Promise.all(
+    config.secretRefs.map(async (ref) => ({
+      ref,
+      presence: await checkSecret({
+        store: ref.store,
+        sourceId: ref.sourceId,
+        region,
+        profile,
+      }),
+    })),
+  );
+  const absent = checked.filter((r) => r.presence.status === 'absent');
+
+  // A secret we could not LOOK AT is not a secret we know is missing, and it does not
+  // block the deploy: the task's execution role reads these at start-up, not this
+  // operator, so a denial here says nothing about whether the container will resolve
+  // them. Warn with the reason rather than inventing either answer.
+  for (const { ref, presence } of checked) {
+    if (presence.status === 'unknown') {
+      logger.warn(
+        `Could not verify ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId} in ` +
+          `${region}: ${presence.reason}. Deploying anyway — the task's execution role, ` +
+          'not your profile, is what reads it.',
+      );
+    }
+  }
 
   if (absent.length > 0) {
     problems.push(

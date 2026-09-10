@@ -66,7 +66,7 @@ import {
   push as corePush,
   destroy as coreDestroy,
   scale as coreScale,
-  secretExists,
+  checkSecret,
   readSecret,
   setSecret,
   type ActionResult,
@@ -592,7 +592,7 @@ server.registerTool(
     const checked = await Promise.all(
       refs.map(async (ref) => ({
         ref,
-        exists: await secretExists({
+        presence: await checkSecret({
           store: ref.store,
           sourceId: ref.sourceId,
           region,
@@ -600,12 +600,21 @@ server.registerTool(
         }),
       })),
     );
-    const missing = checked.filter((c) => !c.exists);
+    const missing = checked.filter((c) => c.presence.status === 'absent');
+    // Reported apart from `missing`, because the remedies are opposite: create the
+    // secret, versus fix the credentials you are looking with. Advising creation after
+    // a failed LOOK is how existing secrets get duplicated into the wrong account.
+    const unknown = checked.filter((c) => c.presence.status === 'unknown');
+
+    const mark = (s: 'present' | 'absent' | 'unknown') =>
+      s === 'present' ? '✓' : s === 'absent' ? '✗' : '?';
+
     const lines = [
       `${service} secrets in ${region} (account of profile ${profile ?? '(default)'}):`,
       ...checked.map(
-        ({ ref, exists }) =>
-          `  ${exists ? '✓' : '✗'} ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId}`,
+        ({ ref, presence }) =>
+          `  ${mark(presence.status)} ${ref.containerEnvVar} -> ${ref.store}:${ref.sourceId}` +
+          (presence.status === 'unknown' ? `  — could not check: ${presence.reason}` : ''),
       ),
     ];
     if (missing.length > 0) {
@@ -615,7 +624,16 @@ server.registerTool(
           'generate_secret, or the Secrets CLI action if you need a specific value.',
       );
     }
-    return textResult(lines.join('\n'), missing.length > 0);
+    if (unknown.length > 0) {
+      lines.push(
+        '',
+        `${unknown.length} could NOT be checked — this is not the same as missing, and ` +
+          'creating them would be wrong. Usually an expired session or a profile without ' +
+          'read access. Note the region and profile above are the ones this service ' +
+          "DECLARES, so re-authenticate that profile rather than your default.",
+      );
+    }
+    return textResult(lines.join('\n'), missing.length > 0 || unknown.length > 0);
   },
 );
 
