@@ -180,6 +180,42 @@ RUN set -eux; \
     test -f /addons/sourcemod/plugins/all4dead2.smx; \
     rm -f /tmp/all4dead2.sp
 
+# l4dinfectedbots — the infected-side counterpart to Left 4 Bots.
+#
+# The stack shipped a survivor-bot AI overhaul and NOTHING that changes infected
+# behaviour: the only infected entries were three bug fixes (maptankfix,
+# charger-collision-patch, witch_target_patch). Measured live 2026-08-31 — survivors
+# played noticeably better, infected were stock.
+#
+# This spawns its own specials ALONGSIDE the director rather than replacing it — its own
+# readme is explicit that its tank limit "does not affect director tank" and its witch
+# limit "does not affect director witches" — so it is additive to the z_*_limit tuning the
+# manifest now exposes rather than competing with it.
+#
+# Its `default` config section applies at ANY survivor count, so a session of one human
+# plus three bots gets it. Out of the box: per-class limits 2 (stock 1), max_specials 4
+# (stock z_minion_limit 3), plus per-class spawn WEIGHTS and health overrides the stock
+# director does not expose at all.
+#
+# CONFIG-FILE DRIVEN, not cvar driven — the knobs live in data/l4dinfectedbots/<mode>.cfg,
+# so unlike the director cvars they are NOT live-tunable over rcon or through the MCP.
+# That asymmetry is the reason both tiers exist.
+#
+# Pinned to the last commit touching this plugin's directory rather than repo HEAD:
+# L4D1_2-Plugins carries dozens of unrelated plugins and churns constantly.
+ARG IB_SHA=d59a7dc73724e95b1e80d82cc1d66971bf553520
+RUN set -eux; \
+    base="https://raw.githubusercontent.com/fbef0102/L4D1_2-Plugins/${IB_SHA}/l4dinfectedbots"; \
+    curl -sfL "$base/plugins/l4dinfectedbots.smx"                  -o /addons/sourcemod/plugins/l4dinfectedbots.smx; \
+    curl -sfL "$base/gamedata/l4dinfectedbots.txt"                 -o /addons/sourcemod/gamedata/l4dinfectedbots.txt; \
+    curl -sfL "$base/translations/l4dinfectedbots.phrases.txt"     -o /addons/sourcemod/translations/l4dinfectedbots.phrases.txt; \
+    mkdir -p /addons/sourcemod/data/l4dinfectedbots; \
+    for f in coop realism survival versus scavenge; do \
+      curl -sfL "$base/data/l4dinfectedbots/$f.cfg" -o "/addons/sourcemod/data/l4dinfectedbots/$f.cfg"; \
+    done; \
+    test -s /addons/sourcemod/plugins/l4dinfectedbots.smx; \
+    test -s /addons/sourcemod/data/l4dinfectedbots/coop.cfg
+
 # respawn_director's VScript half. The hold-repair logic lives in a .nut rather than in a
 # string pushed through L4D2_ExecVScriptCode, which has an undocumented size ceiling and
 # REJECTS SILENTLY — a 126-byte block defined while 350 and 425-byte blocks did not.
@@ -213,6 +249,20 @@ COPY apps/_shared/source-logship.sh /logship.sh
 # agent — v3 does not go through the gated path — but for the human's direct binds, which
 # are otherwise silently inert. See the shim's own header.
 COPY apps/l4d2/variants/modded/respawn-init.sh /respawn-init.sh
+
+# Make server.cfg exec the file respawn-init.sh writes the join password into. Baked once
+# at build time rather than appended at boot, which would grow the file on every restart.
+#
+# server.cfg is COPYed from the pack stage above, so this edits a known file with known
+# contents. Source re-execs server.cfg on every map change, so sv_password is re-applied
+# for the whole session and not merely at boot.
+#
+# The shim always CREATES both files, empty when the corresponding value is unset, so
+# neither exec ever hits a missing file. respawn_slots carries the coop player cap.
+RUN printf '\nexec respawn_secrets\nexec respawn_slots\n' >> /cfg/server.cfg \
+ && grep -q '^exec respawn_secrets$' /cfg/server.cfg \
+ && grep -q '^exec respawn_slots$'   /cfg/server.cfg
+
 
 RUN chown -R louis:louis /addons /cfg /home/louis/l4d2/bin \
  && chmod +x /logship.sh /respawn-init.sh
